@@ -3,6 +3,11 @@
  *
  * Short sleeps (≤5s) are allowed — they're typically "wait for server to boot".
  * Longer sleeps get blocked with a message telling the agent to use `timer` instead.
+ *
+ * Only blocks when sleep is the LAST (or only) command segment — a leading
+ * `sleep 60 && curl something` is fine; a trailing `build && sleep 60` is not.
+ *
+ * Disable entirely by setting env var: PI_SLEEP_INTERCEPTOR=0
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -11,40 +16,53 @@ import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
 /** Threshold in seconds — sleeps above this get blocked */
 const SLEEP_THRESHOLD = 5;
 
+/** Matches a segment that is SOLELY a sleep call (no operators). */
+const SOLE_SLEEP_PATTERN = /^\s*sleep\s+(\d+(?:\.\d+)?)\s*([smh]?)\s*$/;
+
 /**
- * Match sleep commands and extract the duration.
- * Handles: sleep 60, sleep 60s, sleep 1m, sleep 0.5h,
- *          sleep 60 &&, sleep 60;, sleep 60 |
+ * Parse sleep duration from a SINGLE command segment (no operators).
+ * Segment must be SOLELY a sleep command (whitespace OK).
+ * Pattern: /^\s*sleep\s+(\d+(?:\.\d+)?)\s*([smh]?)\s*$/
+ * Returns null if not a sole sleep.
  */
-const SLEEP_PATTERN = /\bsleep\s+(\d+(?:\.\d+)?)\s*([smh]?)(?:\s|;|&|\||$)/g;
+export function segmentSleepSeconds(segment: string): number | null {
+	const match = SOLE_SLEEP_PATTERN.exec(segment);
+	if (!match) return null;
 
-export function parseSleepSeconds(command: string): number | null {
-	SLEEP_PATTERN.lastIndex = 0;
-	let maxSleep = 0;
-	let found = false;
+	const value = parseFloat(match[1]);
+	const unit = match[2] || "s";
 
-	let match: RegExpExecArray | null;
-	while ((match = SLEEP_PATTERN.exec(command)) !== null) {
-		found = true;
-		const value = parseFloat(match[1]);
-		const unit = match[2] || "s";
+	if (unit === "m") return value * 60;
+	if (unit === "h") return value * 3600;
+	return value;
+}
 
-		let seconds = value;
-		if (unit === "m") seconds = value * 60;
-		if (unit === "h") seconds = value * 3600;
+/**
+ * Returns sleep duration if the command's LAST segment is a sleep call.
+ * Splits on &&, ||, |, ; (simple split, best-effort, no quote handling).
+ * Trims and filters empty segments. Checks the last one.
+ * Returns null if sleep is not the trailing command (or no sleep).
+ */
+export function getTrailingSleepSeconds(command: string): number | null {
+	const segments = command
+		.split(/&&|\|\||[|;]/)
+		.map((s) => s.trim())
+		.filter((s) => s.length > 0);
 
-		maxSleep = Math.max(maxSleep, seconds);
-	}
+	if (segments.length === 0) return null;
 
-	return found ? maxSleep : null;
+	const last = segments[segments.length - 1];
+	return segmentSleepSeconds(last);
 }
 
 export function registerSleepInterceptor(pi: ExtensionAPI): void {
+	if (process.env.PI_SLEEP_INTERCEPTOR === "0") return;
+
 	pi.on("tool_call", async (event) => {
 		if (!isToolCallEventType("bash", event)) return;
 
 		const command = event.input.command;
-		const sleepSeconds = parseSleepSeconds(command);
+		const sleepSeconds = getTrailingSleepSeconds(command);
 
 		if (sleepSeconds === null || sleepSeconds <= SLEEP_THRESHOLD) return;
 
