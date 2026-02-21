@@ -1,0 +1,9 @@
+{
+  "skills": [
+    {
+      "name": "pi-heartbeat",
+      "path": "skills/pi-heartbeat/SKILL.md",
+      "description": "Non-blocking timers and heartbeats for pi agents. Use instead of `sleep` when waiting for builds, deployments, CI pipelines, or any async process. The agent returns to idle immediately and gets woken up when the timer fires. Triggers: timer, heartbeat, wait for build, poll, cron, wake me up, non-blocking wait, check back later, monitor deployment, periodic check."
+    }
+  ]
+}
