@@ -1,0 +1,56 @@
+{
+  "name": "@marcfargas/pi-heartbeat",
+  "version": "0.0.1",
+  "description": "Non-blocking timers and heartbeats for pi agents — stop using sleep",
+  "author": "Marc Fargas",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marcfargas/pi-heartbeat.git"
+  },
+  "keywords": [
+    "pi",
+    "pi-package",
+    "agent",
+    "timer",
+    "heartbeat",
+    "cron",
+    "non-blocking",
+    "polling"
+  ],
+  "files": [
+    "src/**/*.ts",
+    "skills/**/*.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.50.0"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/ __tests__/"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.27.0",
+    "@mariozechner/pi-coding-agent": ">=0.50.0",
+    "@sinclair/typebox": "^0.34.0",
+    "@mariozechner/pi-ai": ">=0.50.0",
+    "eslint": "^9.27.0",
+    "globals": "^16.1.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.32.1",
+    "vitest": "^3.1.4"
+  }
+}
