@@ -42,21 +42,29 @@ export class TimerManager {
 		const timeout = setTimeout(() => {
 			this.timers.delete(timerId);
 
-			this.pi.sendMessage(
-				{
-					customType: "heartbeat-timer",
-					content: `⏰ Timer [${timerId}] fired (after ${seconds}s): ${message}`,
-					display: true,
-					details: {
-						type: "timer",
-						timerId,
-						seconds,
-						message,
-						firedAt: new Date().toISOString(),
+			try {
+				this.pi.sendMessage(
+					{
+						customType: "heartbeat-timer",
+						content: `⏰ Timer [${timerId}] fired (after ${seconds}s): ${message}`,
+						display: true,
+						details: {
+							type: "timer",
+							timerId,
+							seconds,
+							message,
+							firedAt: new Date().toISOString(),
+						},
 					},
-				},
-				{ triggerTurn: true },
-			);
+					{ triggerTurn: true },
+				);
+			} catch {
+				// The extension ctx is stale (session replaced/reloaded) or the
+				// session is shutting down. sendMessage will never succeed on
+				// this ctx, so there's nothing useful to do. The timer has
+				// already been removed from `this.timers` above. Swallow to
+				// prevent an uncaughtException that would kill the pi process.
+			}
 		}, seconds * 1000);
 
 		this.timers.set(timerId, timeout);
@@ -98,22 +106,30 @@ export class TimerManager {
 		this.heartbeatInterval = setInterval(() => {
 			state.tick++;
 
-			this.pi.sendMessage(
-				{
-					customType: "heartbeat-ping",
-					content: `💓 Heartbeat #${currentId} tick ${state.tick} (every ${intervalSeconds}s): ${message}`,
-					display: true,
-					details: {
-						type: "heartbeat",
-						heartbeatId: currentId,
-						tick: state.tick,
-						intervalSeconds,
-						message,
-						firedAt: new Date().toISOString(),
+			try {
+				this.pi.sendMessage(
+					{
+						customType: "heartbeat-ping",
+						content: `💓 Heartbeat #${currentId} tick ${state.tick} (every ${intervalSeconds}s): ${message}`,
+						display: true,
+						details: {
+							type: "heartbeat",
+							heartbeatId: currentId,
+							tick: state.tick,
+							intervalSeconds,
+							message,
+							firedAt: new Date().toISOString(),
+						},
 					},
-				},
-				{ triggerTurn: true },
-			);
+					{ triggerTurn: true },
+				);
+			} catch {
+				// The extension ctx is stale (session replaced/reloaded) or the
+				// session is shutting down. Stop the interval so we don't keep
+				// throwing on every tick — a zombie interval that wastes CPU
+				// and risks crashing the process via uncaughtException.
+				this.stopHeartbeat();
+			}
 		}, intervalSeconds * 1000);
 
 		return { ...state };
