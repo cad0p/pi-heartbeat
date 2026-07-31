@@ -6,6 +6,7 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { acquireBackgroundWork } from "./background-work.js";
 
 export interface ActiveTimer {
 	id: string;
@@ -28,6 +29,10 @@ export class TimerManager {
 	private heartbeatInterval: NodeJS.Timeout | undefined;
 	private heartbeatState: HeartbeatState | undefined;
 	private heartbeatIdCounter = 0;
+	// Release functions for background-work tokens, so completion notifiers
+	// (see background-work.ts) can wait for pending timers/heartbeats.
+	private timerTokens = new Map<string, () => void>();
+	private heartbeatToken: (() => void) | undefined;
 
 	constructor(private pi: ExtensionAPI) {}
 
@@ -39,8 +44,11 @@ export class TimerManager {
 		// Cancel existing timer with same ID
 		this.cancelTimer(timerId);
 
+		const release = acquireBackgroundWork(`pi-heartbeat:timer:${timerId}`);
+
 		const timeout = setTimeout(() => {
 			this.timers.delete(timerId);
+			this.timerTokens.delete(timerId);
 
 			try {
 				this.pi.sendMessage(
@@ -64,10 +72,15 @@ export class TimerManager {
 				// this ctx, so there's nothing useful to do. The timer has
 				// already been removed from `this.timers` above. Swallow to
 				// prevent an uncaughtException that would kill the pi process.
+			} finally {
+				// The wake has been handed off (or abandoned on a stale ctx);
+				// either way this timer no longer counts as pending work.
+				release();
 			}
 		}, seconds * 1000);
 
 		this.timers.set(timerId, timeout);
+		this.timerTokens.set(timerId, release);
 		return timerId;
 	}
 
@@ -76,6 +89,9 @@ export class TimerManager {
 		if (timeout) {
 			clearTimeout(timeout);
 			this.timers.delete(id);
+			const release = this.timerTokens.get(id);
+			this.timerTokens.delete(id);
+			release?.();
 			return true;
 		}
 		return false;
@@ -102,6 +118,8 @@ export class TimerManager {
 		};
 
 		const state = this.heartbeatState;
+
+		this.heartbeatToken = acquireBackgroundWork("pi-heartbeat:heartbeat");
 
 		this.heartbeatInterval = setInterval(() => {
 			state.tick++;
@@ -142,6 +160,9 @@ export class TimerManager {
 			this.heartbeatInterval = undefined;
 			this.heartbeatState = undefined;
 		}
+		const release = this.heartbeatToken;
+		this.heartbeatToken = undefined;
+		release?.();
 		return state;
 	}
 
@@ -160,6 +181,10 @@ export class TimerManager {
 			clearTimeout(t);
 		}
 		this.timers.clear();
+		for (const [, release] of this.timerTokens) {
+			release();
+		}
+		this.timerTokens.clear();
 		this.stopHeartbeat();
 	}
 }
