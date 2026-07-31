@@ -115,6 +115,25 @@ Timer fires -> pi triggers a new agent turn
 -> if needed, schedules another timer/heartbeat
 ```
 
+## Background-work protocol
+
+Timers and heartbeats advertise their pending work through a shared
+registry so completion-notifier extensions can wait for them.
+
+Pi's `agent_settled` event only covers Pi's own continuations (retries,
+compaction, queued follow-ups). A pending timer or an active heartbeat
+wakes the agent later, so a notifier hooking `agent_settled` can still
+fire prematurely. To fix that, this package acquires a token in a
+process-global registry (`globalThis` behind `Symbol.for("pi:background-work")`)
+when a timer is scheduled or a heartbeat is running, and releases it when
+the work fires, is cancelled, or is stopped.
+
+Notifier extensions that understand the protocol defer their notification
+until `pending()` reaches zero. The protocol is the registry key plus the
+token shape — see `src/background-work.ts`. It is opt-in and
+self-initializing: if no other extension participates, behavior is
+unchanged.
+
 ## vs. sleep
 
 |  | `sleep 60` | `timer(60)` |
