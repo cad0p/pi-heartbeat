@@ -1,0 +1,8 @@
+# Build-script approval for the @mariozechner/pi-ai peer graph (mirrors
+# pi-napkin/pi-steering): esbuild's binary is needed by vitest, genai's
+# postinstall by its JS runtime; koffi/protobufjs work without theirs.
+allowBuilds:
+  '@google/genai': true
+  esbuild: true
+  koffi: false
+  protobufjs: false

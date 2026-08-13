@@ -15,14 +15,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # pnpm 11 — same install path pi uses for this extension, so an
+      # unapproved build script (ERR_PNPM_IGNORED_BUILDS) fails CI instead
+      # of breaking `pi update` locally.
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          cache: npm
-      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
-      - run: npm install
-      - run: npm run lint
-      - run: npm run typecheck
+          cache: pnpm
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae172922ff96 # v6
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run typecheck
       - name: Validate skills
         run: |
           for skill_dir in skills/*/; do
@@ -39,12 +45,15 @@ jobs:
         node-version: [22, 24]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: npm
-      - run: npm install
-      - run: npm test
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
 
   integration:
     needs: lint
@@ -52,10 +61,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          cache: npm
-      - run: npm install
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - name: Integration tests (sandbox install + extension loading)
-        run: npm run test:integration
+        run: pnpm run test:integration
