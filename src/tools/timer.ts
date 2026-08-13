@@ -2,7 +2,7 @@
  * Timer tool — one-shot non-blocking "wake me up in N seconds".
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import type { TimerManager } from "../timer-manager.js";
 

@@ -8,7 +8,7 @@
  *   - /cancel-timer command
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerTimerTool } from "./tools/timer.js";
 import { registerHeartbeatTool } from "./tools/heartbeat.js";
 import { TimerManager } from "./timer-manager.js";

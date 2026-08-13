@@ -5,7 +5,7 @@
  * Fires messages via pi.sendMessage({ triggerTurn: true }) to wake the agent.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export interface ActiveTimer {
 	id: string;

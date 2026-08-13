@@ -10,8 +10,8 @@
  * Disable entirely by setting env var: PI_SLEEP_INTERCEPTOR=0
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 
 /** Threshold in seconds — sleeps above this get blocked */
 const SLEEP_THRESHOLD = 5;

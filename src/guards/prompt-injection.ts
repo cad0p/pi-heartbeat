@@ -5,7 +5,7 @@
  * even if the skill isn't loaded.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const TIMER_PROMPT = `
 ## Non-blocking Timers (pi-heartbeat extension)

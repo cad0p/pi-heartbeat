@@ -2,9 +2,8 @@
  * Heartbeat tool — periodic non-blocking "ping me every N seconds".
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { StringEnum } from "@mariozechner/pi-ai";
 import type { TimerManager } from "../timer-manager.js";
 
 export function registerHeartbeatTool(pi: ExtensionAPI, manager: TimerManager): void {
@@ -17,7 +16,7 @@ export function registerHeartbeatTool(pi: ExtensionAPI, manager: TimerManager): 
 			"(deployment progress, CI pipeline, server health, process supervision). " +
 			"Only one heartbeat can be active at a time. Starting a new one stops the previous.",
 		parameters: Type.Object({
-			action: StringEnum(["start", "stop", "status"] as const),
+			action: Type.Union([Type.Literal("start"), Type.Literal("stop"), Type.Literal("status")]),
 			interval_seconds: Type.Optional(
 				Type.Number({
 					description: "Interval between heartbeats in seconds (default: 60, min: 10)",
@@ -78,7 +77,7 @@ export function registerHeartbeatTool(pi: ExtensionAPI, manager: TimerManager): 
 				};
 			}
 
-			// action === "start"
+		// action === "start"
 			const intervalSec = params.interval_seconds ?? 60;
 			const msg = params.message ?? "Periodic status check";
 			const state = manager.startHeartbeat(intervalSec, msg);

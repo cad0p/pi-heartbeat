@@ -2,7 +2,7 @@
  * /cancel-timer command — list or cancel timers and heartbeats.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { TimerManager } from "../timer-manager.js";
 
 export function registerCancelCommand(pi: ExtensionAPI, manager: TimerManager): void {

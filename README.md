@@ -6,7 +6,7 @@ Non-blocking timers and heartbeats for [pi](https://github.com/badlogic/pi-mono)
 
 ## What is pi?
 
-[Pi](https://github.com/badlogic/pi-mono) is an AI coding agent CLI (`@mariozechner/pi-coding-agent`).
+[Pi](https://github.com/badlogic/pi-mono) is an AI coding agent CLI (`@earendil-works/pi-coding-agent`).
 
 You run AI models in an interactive terminal, and the agent executes tools/commands while you chat with it. In that environment, `bash` calls like `sleep 60` block the active turn and prevent interaction until the command finishes.
 

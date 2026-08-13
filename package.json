@@ -35,7 +35,7 @@
     ]
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": ">=0.50.0"
+    "@earendil-works/pi-coding-agent": ">=0.84.0"
   },
   "scripts": {
     "test": "vitest run",
@@ -46,15 +46,14 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.27.0",
-    "@mariozechner/pi-coding-agent": "0.54.0",
     "@sinclair/typebox": "^0.34.0",
-    "@mariozechner/pi-ai": "0.54.0",
     "eslint": "^9.27.0",
     "globals": "^16.1.0",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.32.1",
     "vitest": "^3.1.4",
     "@changesets/cli": "^2.29.3",
-    "@marcfargas/pi-test-harness": "^0.4.1"
+    "@marcfargas/pi-test-harness": "^0.4.1",
+    "@earendil-works/pi-coding-agent": "^0.84.0"
   }
 }
