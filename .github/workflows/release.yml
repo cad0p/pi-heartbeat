@@ -1,12 +1,8 @@
-name: Release
+name: Auto Release
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
-
-concurrency: ${{ github.workflow }}-${{ github.ref }}
+  push:
+    branches: [main, 'release/*']
 
 permissions:
   contents: write
@@ -15,25 +11,24 @@ permissions:
 
 jobs:
   release:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      has_changes: ${{ steps.release.outputs.has_changes }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - id: release
+        uses: cad0p/semver-calver-release/release@v1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24
-          cache: npm
-          registry-url: https://registry.npmjs.org
-      - run: npm install
+          skip_release: ${{ github.ref != 'refs/heads/main' }}
 
-      - name: Create Release PR or Publish
-        id: changesets
-        uses: changesets/action@e87c8ed249971350e47fab7515075f44eb134e5b # v1.7.0
+  publish:
+    needs: release
+    if: github.ref == 'refs/heads/main' && needs.release.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: cad0p/semver-calver-release/npm-publish@v1
         with:
-          publish: npx changeset publish
-          title: "chore: version packages"
-          commit: "chore: version packages"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          tag: v${{ needs.release.outputs.version }}
