@@ -1,4 +1,4 @@
-# @marcfargas/pi-heartbeat
+# @cad0p/pi-heartbeat
 
 Non-blocking timers and heartbeats for [pi](https://github.com/badlogic/pi-mono) agents.
 
@@ -29,14 +29,14 @@ With `pi-heartbeat`:
 ## Install
 
 ```bash
-pi install npm:@marcfargas/pi-heartbeat
+pi install npm:@cad0p/pi-heartbeat
 ```
 
 Or add to your `settings.json`:
 
 ```json
 {
-  "packages": ["npm:@marcfargas/pi-heartbeat"]
+  "packages": ["npm:@cad0p/pi-heartbeat"]
 }
 ```
 

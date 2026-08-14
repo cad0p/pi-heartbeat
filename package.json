@@ -1,5 +1,5 @@
 {
-  "name": "@marcfargas/pi-heartbeat",
+  "name": "@cad0p/pi-heartbeat",
   "version": "0.0.1",
   "description": "Non-blocking timers and heartbeats for pi agents — stop using sleep",
   "author": "Marc Fargas",
@@ -7,7 +7,10 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/marcfargas/pi-heartbeat.git"
+    "url": "https://github.com/cad0p/pi-heartbeat.git"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": [
     "pi",
