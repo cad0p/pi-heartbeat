@@ -58,5 +58,8 @@
     "@changesets/cli": "^2.29.3",
     "@marcfargas/pi-test-harness": "^0.4.1",
     "@earendil-works/pi-coding-agent": "^0.84.0"
+  },
+  "engines": {
+    "node": ">=22.19.0"
   }
 }
