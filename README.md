@@ -97,6 +97,10 @@ The code being reloaded from decides this. The first `/reload` after updating fr
 
 If the extension is loaded twice into the same session, the second copy keeps its timers separate from the first, and those timers do not survive `/reload`.
 
+### Background work
+
+While timers are armed, the heartbeat runs, or a tick is queued during a `/reload` gap, the session has background work. The extension reports it to `@cad0p/pi-background-work`, so consumers such as `bg_wait` see it. Items are `timer:<id>`, `heartbeat:<n>` and `pending:<seq>`. Timer ids must be 1-200 characters, with no edge whitespace and no control characters; the `timer` tool rejects other ids.
+
 ## When to Use
 
 | Scenario | Before (blocks) | After (non-blocking) |

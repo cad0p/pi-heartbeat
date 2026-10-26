@@ -14,7 +14,8 @@ export function registerHeartbeatTool(pi: ExtensionAPI, manager: TimerManager): 
 			"Start or stop a periodic heartbeat. When running, you get woken up every N seconds " +
 			"with a status check message. Use for long-running monitoring " +
 			"(deployment progress, CI pipeline, server health, process supervision). " +
-			"Only one heartbeat can be active at a time. Starting a new one stops the previous.",
+			"Only one heartbeat can be active at a time. Starting a new one stops the previous. " +
+			"Stop the heartbeat when the work you are monitoring is done; while it runs, your session counts as having pending background work.",
 		parameters: Type.Object({
 			action: Type.Union([Type.Literal("start"), Type.Literal("stop"), Type.Literal("status")]),
 			interval_seconds: Type.Optional(

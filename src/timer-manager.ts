@@ -50,6 +50,8 @@ interface ArmedHeartbeat {
 interface QueuedMessage {
 	heartbeatId?: number;
 	message: OutgoingMessage;
+	/** Stable per-entry sequence, assigned when queued while detached (background-work ids). */
+	seq?: number;
 }
 
 /**
@@ -57,7 +59,7 @@ interface QueuedMessage {
  * only be added. Readers accept the current version (and N-1 once a v2 exists);
  * any other version is disposed and replaced.
  */
-interface SessionEntry {
+export interface SessionEntry {
 	version: 1;
 	timers: Map<string, ArmedTimer>;
 	timerCounter: number;
@@ -66,6 +68,8 @@ interface SessionEntry {
 	/** Set while attached to a live activation; unset while detached (reload gap). */
 	deliver?: Deliver;
 	pending: QueuedMessage[];
+	/** Last `seq` handed out to a queued message. */
+	queueCounter?: number;
 	detachTimer?: NodeJS.Timeout;
 	dispose(): void;
 }
@@ -74,7 +78,11 @@ const SESSIONS = Symbol.for("pi-heartbeat.sessions");
 /** How long a detached entry waits for the reloaded activation before it is retired. */
 const DETACH_GRACE_MS = 5 * 60_000;
 
-function registry(): Map<string, SessionEntry> {
+/** Timer ids the `timer` tool accepts: 1-200 chars, no edge whitespace, no control characters. */
+export const TIMER_ID_MAX_LENGTH = 200;
+export const TIMER_ID_PATTERN = "^(?!\\s)(?!.*\\s$)[^\\x00-\\x1f\\x7f]+$";
+
+export function registry(): Map<string, SessionEntry> {
 	const host = globalThis as unknown as { [SESSIONS]?: Map<string, SessionEntry> };
 	host[SESSIONS] ??= new Map();
 	return host[SESSIONS];
@@ -138,7 +146,8 @@ function send(entry: SessionEntry, item: QueuedMessage): void {
 	if (item.heartbeatId !== undefined) {
 		entry.pending = entry.pending.filter((queued) => queued.heartbeatId !== item.heartbeatId);
 	}
-	entry.pending.push(item);
+	entry.queueCounter = (entry.queueCounter ?? 0) + 1;
+	entry.pending.push({ ...item, seq: entry.queueCounter });
 }
 
 function flush(entry: SessionEntry): void {
