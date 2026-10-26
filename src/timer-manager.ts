@@ -151,13 +151,13 @@ function flush(entry: SessionEntry): void {
 }
 
 /**
- * Adopt the entry on a reload (flush deferred so no run starts inside the reload). Otherwise a detached
+ * Adopt a detached entry on a reload (flush deferred so no run starts inside the reload). Otherwise a detached
  * entry is replaced, and a live one is left to its activation: this one runs standalone, off the registry.
  */
 function attach(key: string, reason: string, deliver: Deliver): SessionEntry {
 	const sessions = registry();
 	const existing = sessions.get(key);
-	if (existing?.version === 1 && reason === "reload") {
+	if (existing?.version === 1 && existing.deliver === undefined && reason === "reload") {
 		clearTimeout(existing.detachTimer);
 		existing.deliver = deliver;
 		setTimeout(() => flush(existing), 0);
@@ -207,7 +207,7 @@ export class TimerManager {
 		const key = this.sessionKey;
 		entry.deliver = undefined;
 		clearTimeout(entry.detachTimer);
-		entry.detachTimer = setTimeout(() => retire(key, entry), DETACH_GRACE_MS);
+		entry.detachTimer = setTimeout(() => retire(key, entry), DETACH_GRACE_MS).unref();
 	}
 
 	/** session_shutdown (any other reason): tear the session's armed state down. */

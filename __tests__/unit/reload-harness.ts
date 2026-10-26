@@ -26,6 +26,7 @@ export interface Activation {
 	shutdown(reason: string): void;
 	setTimer(seconds: number, message: string, id?: string): Promise<unknown>;
 	startHeartbeat(intervalSeconds: number, message: string): Promise<unknown>;
+	stopHeartbeat(): Promise<unknown>;
 	cancel(args: string): Promise<void>;
 }
 
@@ -88,6 +89,7 @@ export function activation(key: string = randomUUID()): Activation {
 		setTimer: (seconds, message, id) => call("timer", { seconds, message, id }),
 		startHeartbeat: (interval_seconds, message) =>
 			call("heartbeat", { action: "start", interval_seconds, message }),
+		stopHeartbeat: () => call("heartbeat", { action: "stop" }),
 		cancel: async (args) => {
 			await commands.get("cancel-timer")?.handler(args, ctx);
 		},

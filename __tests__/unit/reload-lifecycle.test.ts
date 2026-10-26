@@ -143,4 +143,42 @@ describe("reload survival: lifecycle", () => {
 		expect(sentContents(fresh)).toEqual([expect.stringContaining("fired (after 5s): new")]);
 		expect(before.sendMessage).not.toHaveBeenCalled();
 	});
+
+	it("(20) a second copy that reloads takes its own entry; the live copy's heartbeat keeps ticking", async () => {
+		const alpha = activation();
+		const beta = activation(alpha.key);
+		alpha.start("startup");
+		beta.start("startup");
+		await alpha.startHeartbeat(10, "alpha-hb");
+		await beta.startHeartbeat(10, "beta-hb");
+		alpha.shutdown("reload");
+		beta.shutdown("reload");
+		const alphaAfter = activation(alpha.key);
+		alphaAfter.start("reload");
+		const betaAfter = activation(alpha.key);
+		betaAfter.start("reload");
+		await betaAfter.startHeartbeat(10, "gamma-hb");
+		vi.advanceTimersByTime(20_000);
+		expect(sentContents(alphaAfter)).toEqual([
+			expect.stringContaining("tick 1 (every 10s): alpha-hb"),
+			expect.stringContaining("tick 2 (every 10s): alpha-hb"),
+		]);
+		expect(sentContents(betaAfter)).toEqual([
+			expect.stringContaining("tick 1 (every 10s): gamma-hb"),
+			expect.stringContaining("tick 2 (every 10s): gamma-hb"),
+		]);
+	});
+
+	it("(21) a heartbeat stopped while detached drops its queued gap tick; adoption delivers nothing stale", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(10, "old");
+		before.shutdown("reload");
+		vi.advanceTimersByTime(10_000); // tick 1 is queued in the gap
+		await before.stopHeartbeat();
+		const after = activation(before.key);
+		after.start("reload");
+		vi.advanceTimersByTime(60_000);
+		expect(sentContents(after)).toEqual([]);
+	});
 });
