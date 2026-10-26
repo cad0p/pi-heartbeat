@@ -89,6 +89,14 @@ Manual timer/heartbeat control from chat.
 
 Use this when you need immediate control without waiting for the next trigger.
 
+### Surviving `/reload`
+
+Armed timers and the heartbeat survive `/reload`: they keep their schedule, fire into the reloaded session, and ids continue (`timer-N+1`, next heartbeat number). Any other shutdown (quit, new, resume, fork) clears them as before.
+
+The code being reloaded from decides this. The first `/reload` after updating from an older version still clears timers and the heartbeat; every later reload keeps them.
+
+If the extension is loaded twice into the same session, the second copy keeps its timers separate from the first, and those timers do not survive `/reload`.
+
 ## When to Use
 
 | Scenario | Before (blocks) | After (non-blocking) |
