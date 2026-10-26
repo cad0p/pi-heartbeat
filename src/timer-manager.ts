@@ -33,6 +33,7 @@ type OutgoingMessage = {
 
 type Deliver = (message: OutgoingMessage) => boolean;
 
+/** `seconds`, `message`, `createdAt` and `deadline` are written but not read yet: kept for the cross-version contract and restart persistence (#7). */
 interface ArmedTimer {
 	timeout: NodeJS.Timeout;
 	seconds: number;
@@ -149,7 +150,10 @@ function flush(entry: SessionEntry): void {
 	}
 }
 
-/** Adopt the entry on a reload (flush deferred so no run starts inside the reload); otherwise replace it. */
+/**
+ * Adopt the entry on a reload (flush deferred so no run starts inside the reload). Otherwise a detached
+ * entry is replaced, and a live one is left to its activation: this one runs standalone, off the registry.
+ */
 function attach(key: string, reason: string, deliver: Deliver): SessionEntry {
 	const sessions = registry();
 	const existing = sessions.get(key);
@@ -159,25 +163,27 @@ function attach(key: string, reason: string, deliver: Deliver): SessionEntry {
 		setTimeout(() => flush(existing), 0);
 		return existing;
 	}
-	existing?.dispose();
 	const entry = createEntry();
 	entry.deliver = deliver;
+	if (existing?.deliver) {
+		return entry;
+	}
+	existing?.dispose();
 	sessions.set(key, entry);
 	return entry;
 }
 
-function retire(entry: SessionEntry): void {
+/** Dispose an entry and drop its registry slot, if the slot still holds this entry (a standalone one never does). */
+function retire(key: string | undefined, entry: SessionEntry): void {
 	entry.dispose();
-	const sessions = registry();
-	for (const [key, value] of sessions) {
-		if (value === entry) {
-			sessions.delete(key);
-		}
+	if (key !== undefined && registry().get(key) === entry) {
+		registry().delete(key);
 	}
 }
 
 export class TimerManager {
 	private session: SessionEntry;
+	private sessionKey?: string;
 	private readonly deliverNow: Deliver;
 
 	/** Starts on a standalone entry; `bind` moves it onto the session registry at session_start. */
@@ -191,20 +197,22 @@ export class TimerManager {
 
 	bind(key: string, reason: string): void {
 		this.session.dispose();
+		this.sessionKey = key;
 		this.session = attach(key, reason, this.deliverNow);
 	}
 
 	/** session_shutdown{reload}: stop delivering; the reloaded activation adopts the armed state. */
 	detach(): void {
 		const entry = this.session;
+		const key = this.sessionKey;
 		entry.deliver = undefined;
 		clearTimeout(entry.detachTimer);
-		entry.detachTimer = setTimeout(() => retire(entry), DETACH_GRACE_MS);
+		entry.detachTimer = setTimeout(() => retire(key, entry), DETACH_GRACE_MS);
 	}
 
 	/** session_shutdown (any other reason): tear the session's armed state down. */
 	end(): void {
-		retire(this.session);
+		retire(this.sessionKey, this.session);
 	}
 
 	// ── One-shot timers ─────────────────────────────────────────────

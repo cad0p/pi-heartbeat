@@ -95,6 +95,8 @@ Armed timers and the heartbeat survive `/reload`: they keep their schedule, fire
 
 The code being reloaded from decides this. The first `/reload` after updating from an older version still clears timers and the heartbeat; every later reload keeps them.
 
+If the extension is loaded twice into the same session, the second copy keeps its timers separate from the first, and those timers do not survive `/reload`.
+
 ## When to Use
 
 | Scenario | Before (blocks) | After (non-blocking) |

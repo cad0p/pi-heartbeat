@@ -110,4 +110,37 @@ describe("reload survival: lifecycle", () => {
 		expect(sentContents(main)).toEqual([expect.stringContaining("fired (after 30s): main")]);
 		expect(sentContents(childAfter)).toEqual([expect.stringContaining("fired (after 10s): child")]);
 	});
+
+	it("(18) a second activation on a live session key runs independently; neither loses timers", async () => {
+		const first = activation();
+		const second = activation(first.key);
+		first.start("startup");
+		await first.setTimer(10, "first");
+		second.start("startup");
+		await second.setTimer(10, "second");
+		await first.setTimer(20, "first-late");
+
+		vi.advanceTimersByTime(20_000);
+
+		expect(sentContents(first)).toEqual([
+			expect.stringContaining("fired (after 10s): first"),
+			expect.stringContaining("fired (after 20s): first-late"),
+		]);
+		expect(sentContents(second)).toEqual([expect.stringContaining("fired (after 10s): second")]);
+	});
+
+	it("(19) a detached entry is replaced, not adopted, by a non-reload start on the same key", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.setTimer(10, "old");
+		before.shutdown("reload");
+
+		const fresh = activation(before.key);
+		fresh.start("startup");
+		await fresh.setTimer(5, "new");
+		vi.advanceTimersByTime(10_000);
+
+		expect(sentContents(fresh)).toEqual([expect.stringContaining("fired (after 5s): new")]);
+		expect(before.sendMessage).not.toHaveBeenCalled();
+	});
 });
