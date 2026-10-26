@@ -78,7 +78,7 @@ describe("background work: registration and corrupt state", () => {
 		expect(sentContents(act)).toEqual([expect.stringContaining("fired (after 10s): x")]);
 	});
 
-	it("(11) a corrupt entry is skipped; other sessions are still listed", async () => {
+	it("(11) a corrupt entry lists nothing for its own session; other sessions are unaffected", async () => {
 		const broken = activation();
 		const first = activation();
 		const second = activation();
@@ -93,5 +93,16 @@ describe("background work: registration and corrupt state", () => {
 		expect(listedWork(broken.key)).toEqual([]);
 		expect(listedWork(first.key)).toEqual(["timer:one"]);
 		expect(listedWork(second.key)).toEqual(["timer:two"]);
+	});
+
+	it("(11b) one corrupt entry in a multi-session snapshot does not hide a healthy session's work", async () => {
+		const broken = activation();
+		const healthy = activation();
+		broken.start("startup");
+		healthy.start("startup");
+		await healthy.setTimer(60, "x", "ok");
+		corrupt(broken.key);
+
+		expect(snapshotBackgroundWork([broken.key, healthy.key]).items.map((item) => item.id)).toEqual(["timer:ok"]);
 	});
 });
