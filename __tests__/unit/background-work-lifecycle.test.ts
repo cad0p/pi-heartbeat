@@ -59,15 +59,19 @@ describe("background work: registration and corrupt state", () => {
 		expect(() => snapshotBackgroundWork([broken.key, healthy.key])).not.toThrow();
 	});
 
-	it("(10) a malformed foreign provider does not stop binding or timers", async () => {
+	it("(10) a malformed foreign provider does not stop binding, timers or registration", async () => {
 		Reflect.set(globalThis, Symbol.for(BACKGROUND_WORK_REGISTRY_KEY), {
 			version: 1,
 			providers: new Map([["foreign", { name: "other" }]]),
 		});
+		expect(() => listBackgroundWorkProviders()).toThrow();
 		const act = activation();
 
 		expect(() => act.start("startup")).not.toThrow();
 		expect(registry().has(act.key)).toBe(true);
+		// The public list throws in this state, so read the raw registry to see pi-heartbeat's registration.
+		const slot = Reflect.get(globalThis, Symbol.for(BACKGROUND_WORK_REGISTRY_KEY)) as { providers: Map<string, unknown> };
+		expect(slot.providers.has(PROVIDER)).toBe(true);
 
 		await act.setTimer(10, "x");
 		vi.advanceTimersByTime(10_000);

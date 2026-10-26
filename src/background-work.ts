@@ -58,11 +58,20 @@ export function listArmedWork(context?: BackgroundWorkListContext): BackgroundWo
  * session start registers only when no pi-heartbeat provider is present. The disposer is never
  * called: other sessions in the process still need the provider.
  */
-export function registerProvider(reason: string): void {
+function providerPresent(): boolean {
 	try {
-		if (reason !== "reload" && listBackgroundWorkProviders().some((provider) => provider.name === PROVIDER_NAME)) {
-			return;
-		}
+		return listBackgroundWorkProviders().some((provider) => provider.name === PROVIDER_NAME);
+	} catch {
+		// A malformed provider from another extension makes the list throw. Treat that as absent so registration still runs.
+		return false;
+	}
+}
+
+export function registerProvider(reason: string): void {
+	if (reason !== "reload" && providerPresent()) {
+		return;
+	}
+	try {
 		registerBackgroundWorkProvider({ name: PROVIDER_NAME, listActiveWork: listArmedWork });
 	} catch {
 		// A malformed provider from another extension must not break session binding.
