@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { activation, resetSessions, sentContents } from "./reload-harness.js";
+import { activation, resetSessions, sentContents, sessionRegistry } from "./reload-harness.js";
 
 describe("reload survival: adoption", () => {
 	beforeEach(() => {
@@ -107,5 +107,48 @@ describe("reload survival: adoption", () => {
 
 		vi.advanceTimersByTime(0);
 		expect(after.sendMessage).toHaveBeenCalledOnce();
+	});
+
+	it("(16) adoption cancels the detach grace: timers and the heartbeat outlive 5 minutes", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.setTimer(600, "far");
+		await before.startHeartbeat(60, "hb");
+		before.shutdown("reload");
+		const after = activation(before.key);
+		after.start("reload");
+
+		vi.advanceTimersByTime(5 * 60_000 + 1);
+		expect(sessionRegistry().has(before.key)).toBe(true);
+
+		vi.advanceTimersByTime(60_000);
+		expect(sentContents(after)).toContainEqual(expect.stringContaining("tick 6"));
+
+		vi.advanceTimersByTime(5 * 60_000);
+		expect(sentContents(after)).toContainEqual(expect.stringContaining("fired (after 600s): far"));
+	});
+
+	it("(17) two reloads in a row: a timer armed in the first activation fires into the third, ids continue", async () => {
+		const first = activation();
+		first.start("startup");
+		await first.setTimer(60, "a");
+		first.shutdown("reload");
+		const second = activation(first.key);
+		second.start("reload");
+		await second.setTimer(60, "b");
+		second.shutdown("reload");
+		const third = activation(first.key);
+		third.start("reload");
+		await third.setTimer(60, "c");
+
+		vi.advanceTimersByTime(60_000);
+
+		expect(sentContents(third)).toEqual([
+			expect.stringContaining("Timer [timer-1] fired (after 60s): a"),
+			expect.stringContaining("Timer [timer-2] fired (after 60s): b"),
+			expect.stringContaining("Timer [timer-3] fired (after 60s): c"),
+		]);
+		expect(first.sendMessage).not.toHaveBeenCalled();
+		expect(second.sendMessage).not.toHaveBeenCalled();
 	});
 });
