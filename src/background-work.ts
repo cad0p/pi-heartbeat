@@ -9,18 +9,33 @@ import {
 	listBackgroundWorkProviders,
 	registerBackgroundWorkProvider,
 } from "@cad0p/pi-background-work";
-import { registry, type SessionEntry, TIMER_ID_MAX_LENGTH, TIMER_ID_PATTERN } from "./timer-manager.js";
+import { registry, type SessionEntry } from "./timer-manager.js";
 
 const PROVIDER_NAME = "pi-heartbeat";
 /** The package rejects a provider listing more items than this. */
 const MAX_ITEMS = 10_000;
-const TIMER_ID = new RegExp(TIMER_ID_PATTERN);
+/** The package rejects an item id longer than this. */
+const MAX_ITEM_ID_LENGTH = 256;
+
+/**
+ * Mirrors validateString in @cad0p/pi-background-work for the item `timer:<id>`: non-empty, no NUL,
+ * at most MAX_ITEM_ID_LENGTH. Edge whitespace is checked on the raw id, since the "timer:" prefix would
+ * hide it from the package. Control characters are rejected as the timer tool's schema does.
+ */
+function isListableTimerId(id: string): boolean {
+	return (
+		id.length > 0 &&
+		id.trim() === id &&
+		`timer:${id}`.length <= MAX_ITEM_ID_LENGTH &&
+		![...id].some((char) => char.charCodeAt(0) < 0x20 || char === "\x7f")
+	);
+}
 
 function entryItemIds(entry: SessionEntry): string[] {
 	const ids: string[] = [];
 	for (const id of entry.timers.keys()) {
 		// An id from older code that fails validation would make every snapshot throw, so skip it.
-		if (id.length <= TIMER_ID_MAX_LENGTH && TIMER_ID.test(id)) {
+		if (isListableTimerId(id)) {
 			ids.push(`timer:${id}`);
 		}
 	}
@@ -54,20 +69,21 @@ export function listArmedWork(context?: BackgroundWorkListContext): BackgroundWo
 	return items.slice(0, MAX_ITEMS);
 }
 
-/**
- * Registers the provider once per process. A reload replaces the existing registration; any other
- * session start registers only when no pi-heartbeat provider is present. The disposer is never
- * called: other sessions in the process still need the provider.
- */
 function providerPresent(): boolean {
 	try {
 		return listBackgroundWorkProviders().some((provider) => provider.name === PROVIDER_NAME);
 	} catch {
 		// A malformed provider from another extension makes the list throw. Treat that as absent so registration still runs.
+		// Each non-reload start then re-registers; harmless, since a same-name registration replaces the old one.
 		return false;
 	}
 }
 
+/**
+ * Registers the provider once per process. A reload replaces the existing registration; any other
+ * session start registers only when no pi-heartbeat provider is present. The disposer is never
+ * called: other sessions in the process still need the provider.
+ */
 export function registerProvider(reason: string): void {
 	if (reason !== "reload" && providerPresent()) {
 		return;

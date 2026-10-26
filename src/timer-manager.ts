@@ -80,7 +80,7 @@ const DETACH_GRACE_MS = 5 * 60_000;
 
 /** Timer ids the `timer` tool accepts: 1-200 chars, no edge whitespace, no control characters. */
 export const TIMER_ID_MAX_LENGTH = 200;
-export const TIMER_ID_PATTERN = "^(?!\\s)(?!.*\\s$)[^\\x00-\\x1f\\x7f]+$";
+export const TIMER_ID_PATTERN = "^(?!\\s)(?![\\s\\S]*\\s$)[^\\x00-\\x1f\\x7f]+$";
 
 export function registry(): Map<string, SessionEntry> {
 	const host = globalThis as unknown as { [SESSIONS]?: Map<string, SessionEntry> };

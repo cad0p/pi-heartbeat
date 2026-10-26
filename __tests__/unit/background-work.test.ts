@@ -114,10 +114,23 @@ describe("background work: what the provider reports", () => {
 		expect(accepts("build ")).toBe(false);
 		expect(accepts("a\u0007b")).toBe(false);
 		expect(accepts("x".repeat(201))).toBe(false);
+		expect(accepts("a\u2028b")).toBe(true);
+		expect(accepts("a\u2028b ")).toBe(false);
 
 		// The harness calls execute directly, bypassing the schema: the provider must still skip the bad id.
 		await act.setTimer(10, "x", " bad");
 		await act.setTimer(60, "ok", "good");
+		expect(listedWork(act.key)).toEqual(["timer:good"]);
+	});
+
+	it("(9b) an id the schema would reject, held by the manager, is skipped and does not make the snapshot throw", async () => {
+		const act = activation();
+		act.start("startup");
+		// Bypasses the schema. The old pattern accepted this id, and the package's trim check rejects it.
+		await act.setTimer(10, "x", "a\u2028b ");
+		await act.setTimer(60, "ok", "good");
+
+		expect(() => listedWork(act.key)).not.toThrow();
 		expect(listedWork(act.key)).toEqual(["timer:good"]);
 	});
 });

@@ -99,7 +99,7 @@ If the extension is loaded twice into the same session, the second copy keeps it
 
 ### Background work
 
-While timers are armed, the heartbeat runs, or a tick is queued during a `/reload` gap, the session has background work. The extension registers itself as the `pi-heartbeat` provider of `@cad0p/pi-background-work`, so consumers such as `bg_wait` see it. Items are `timer:<id>`, `heartbeat:<n>` and `pending:<seq>`. Timer ids must be 1-200 characters, with no edge whitespace and no control characters; the `timer` tool rejects other ids.
+While timers are armed, the heartbeat runs, or a heartbeat tick or one-shot timer fires during a `/reload` gap and waits to be delivered, the session has background work. The extension registers itself as the `pi-heartbeat` provider of `@cad0p/pi-background-work`, so consumers such as `bg_wait` see it. Items are `timer:<id>`, `heartbeat:<n>`, `pending:<seq>` for a queued tick or timer, and `pending:legacy-<i>` for one queued before sequence numbers existed. Timer ids must be 1-200 characters, with no edge whitespace and no control characters; the `timer` tool rejects other ids, and the provider skips any armed id the package would reject, so one bad id does not fail a listing.
 
 ## When to Use
 
