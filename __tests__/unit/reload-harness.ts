@@ -6,6 +6,8 @@
 
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { BACKGROUND_WORK_REGISTRY_KEY, snapshotBackgroundWork } from "@cad0p/pi-background-work";
+import type { TSchema } from "@sinclair/typebox";
 import { vi } from "vitest";
 import activate from "../../src/index.js";
 
@@ -14,6 +16,7 @@ export type SentMessage = { customType: string; content: string };
 type Handler = (event: { reason: string }, ctx: unknown) => unknown;
 type ToolDef = {
 	name: string;
+	parameters: TSchema;
 	execute: (id: string, params: Record<string, unknown>) => Promise<unknown>;
 };
 type CommandDef = { handler: (args: string, ctx: unknown) => Promise<void> };
@@ -28,6 +31,7 @@ export interface Activation {
 	startHeartbeat(intervalSeconds: number, message: string): Promise<unknown>;
 	stopHeartbeat(): Promise<unknown>;
 	cancel(args: string): Promise<void>;
+	toolSchema(name: string): TSchema;
 }
 
 const SESSIONS = Symbol.for("pi-heartbeat.sessions");
@@ -93,9 +97,26 @@ export function activation(key: string = randomUUID()): Activation {
 		cancel: async (args) => {
 			await commands.get("cancel-timer")?.handler(args, ctx);
 		},
+		toolSchema: (name) => {
+			const tool = tools.get(name);
+			if (!tool) {
+				throw new Error(`tool ${name} not registered`);
+			}
+			return tool.parameters;
+		},
 	};
 }
 
 export function sentContents(act: Activation): string[] {
 	return act.sendMessage.mock.calls.map(([message]) => message.content);
+}
+
+/** Ids the package's validating snapshot reports for one session. */
+export function listedWork(key: string): string[] {
+	return snapshotBackgroundWork([key]).items.map((item) => item.id);
+}
+
+/** Clear the package's process-wide provider registry. Call in beforeEach. */
+export function resetBackgroundWork(): void {
+	Reflect.deleteProperty(globalThis, Symbol.for(BACKGROUND_WORK_REGISTRY_KEY));
 }

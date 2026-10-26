@@ -11,6 +11,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerTimerTool } from "./tools/timer.js";
 import { registerHeartbeatTool } from "./tools/heartbeat.js";
+import { registerProvider } from "./background-work.js";
 import { TimerManager } from "./timer-manager.js";
 import { registerCancelCommand } from "./commands/cancel.js";
 import { registerSleepInterceptor } from "./guards/sleep-interceptor.js";
@@ -33,6 +34,7 @@ export default function activate(pi: ExtensionAPI): void {
 	// Session binding: a reload keeps armed timers and the heartbeat, every other shutdown clears them
 	pi.on("session_start", (event, ctx) => {
 		manager.bind(ctx.sessionManager.getSessionId(), event.reason);
+		registerProvider(event.reason);
 	});
 	pi.on("session_shutdown", (event) => {
 		if (event.reason === "reload") {

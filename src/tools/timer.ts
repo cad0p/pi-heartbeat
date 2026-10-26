@@ -4,7 +4,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import type { TimerManager } from "../timer-manager.js";
+import { TIMER_ID_MAX_LENGTH, TIMER_ID_PATTERN, type TimerManager } from "../timer-manager.js";
 
 export function registerTimerTool(pi: ExtensionAPI, manager: TimerManager): void {
 	pi.registerTool({
@@ -30,6 +30,8 @@ export function registerTimerTool(pi: ExtensionAPI, manager: TimerManager): void
 			id: Type.Optional(
 				Type.String({
 					description: "Optional timer ID for cancellation. Auto-generated if omitted.",
+					maxLength: TIMER_ID_MAX_LENGTH,
+					pattern: TIMER_ID_PATTERN,
 				}),
 			),
 		}),

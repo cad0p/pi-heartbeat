@@ -6,3 +6,5 @@ allowBuilds:
   esbuild: true
   koffi: false
   protobufjs: false
+minimumReleaseAgeExclude:
+  - '@cad0p/pi-background-work@0.0.1'
