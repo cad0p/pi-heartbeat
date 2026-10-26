@@ -30,8 +30,15 @@ export default function activate(pi: ExtensionAPI): void {
 	// Commands
 	registerCancelCommand(pi, manager);
 
-	// Cleanup
-	pi.on("session_shutdown", async () => {
-		manager.clearAll();
+	// Session binding: a reload keeps armed timers and the heartbeat, every other shutdown clears them
+	pi.on("session_start", (event, ctx) => {
+		manager.bind(ctx.sessionManager.getSessionId(), event.reason);
+	});
+	pi.on("session_shutdown", (event) => {
+		if (event.reason === "reload") {
+			manager.detach();
+		} else {
+			manager.end();
+		}
 	});
 }
