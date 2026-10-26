@@ -29,7 +29,8 @@ function entryItemIds(entry: SessionEntry): string[] {
 	}
 	// Fired during a reload gap and not yet delivered: the wake is still on its way.
 	for (const [index, queued] of entry.pending.entries()) {
-		ids.push(`pending:${queued.seq ?? index}`);
+		// Entries queued before seq existed have no stable id; the legacy form cannot equal a numeric seq.
+		ids.push(queued.seq === undefined ? `pending:legacy-${index}` : `pending:${queued.seq}`);
 	}
 	return ids;
 }

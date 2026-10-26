@@ -1,6 +1,7 @@
 import { snapshotBackgroundWork } from "@cad0p/pi-background-work";
 import { Value } from "@sinclair/typebox/value";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { registry } from "../../src/timer-manager.js";
 import { activation, listedWork, resetBackgroundWork, resetSessions, sentContents } from "./reload-harness.js";
 
 describe("background work: what the provider reports", () => {
@@ -60,6 +61,25 @@ describe("background work: what the provider reports", () => {
 
 		expect(listedWork(before.key)).toEqual([]);
 		expect(sentContents(after)).toEqual([expect.stringContaining("fired (after 10s): gap")]);
+	});
+
+	it("(4b) a legacy pending entry without seq gets its own id and cannot collide with a seq id", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.setTimer(10, "gap");
+		before.shutdown("reload");
+		vi.advanceTimersByTime(10_000);
+
+		const entry = registry().get(before.key);
+		const queued = entry?.pending[0];
+		if (!entry || !queued) {
+			throw new Error("no pending entry");
+		}
+		const legacy = { ...queued };
+		Reflect.deleteProperty(legacy, "seq");
+		entry.pending.push(legacy);
+
+		expect(snapshotBackgroundWork([before.key]).items.map((item) => item.id)).toEqual(["pending:1", "pending:legacy-1"]);
 	});
 
 	it("(5) a timer that fired is no longer listed", async () => {
