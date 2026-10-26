@@ -11,5 +11,6 @@ All notable changes to this project will be documented in this file.
 ### 🚀 Features
 
 - Declare engines node >=22.19.0 (pi's minimum) ([#6](https://github.com/cad0p/pi-heartbeat/pull/6))
+- Armed timers and heartbeat survive /reload (closes #8) ([#9](https://github.com/cad0p/pi-heartbeat/pull/9))
 
 
