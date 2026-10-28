@@ -1,4 +1,10 @@
-import { BACKGROUND_WORK_DISPLAY_KEY, listBackgroundWorkDisplayProviders, snapshotBackgroundWork } from "@cad0p/pi-background-work";
+import {
+	BACKGROUND_WORK_DISPLAY_KEY,
+	collectBackgroundWorkSources,
+	composeFooterText,
+	listBackgroundWorkDisplayProviders,
+	snapshotBackgroundWork,
+} from "@cad0p/pi-background-work";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { describeArmedWork } from "../../src/display-provider.js";
 import { registry } from "../../src/timer-manager.js";
@@ -221,7 +227,19 @@ describe("background work: display registration", () => {
 		expect(displayNamed()).not.toBe(registered);
 	});
 
-	it("(15) a malformed display registry does not stop session binding", async () => {
+	it("(15) the footer shows the described work instead of the bare count", async () => {
+		const act = activation();
+		act.start("startup");
+		await act.setTimer(42, "x");
+		const nowMs = Date.now();
+		const sources = collectBackgroundWorkSources([act.key], nowMs);
+
+		expect(composeFooterText(sources, listBackgroundWorkDisplayProviders(), { sessionId: act.key, sessionIds: [act.key], nowMs })).toBe(
+			"⏳ timer-1 0:42",
+		);
+	});
+
+	it("(16) a malformed display registry does not stop session binding", async () => {
 		// An unsupported version makes registration throw, not only listing.
 		Reflect.set(globalThis, Symbol.for(BACKGROUND_WORK_DISPLAY_KEY), { version: 2, providers: new Map() });
 		expect(() => listBackgroundWorkDisplayProviders()).toThrow();
