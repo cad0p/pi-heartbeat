@@ -168,7 +168,7 @@ describe("reload survival: lifecycle", () => {
 			expect.stringContaining("tick 2 (every 10s): gamma-hb"),
 		]);
 		// The standalone copy is not in the session registry: resetSessions() must shut it down too, or its
-		// heartbeat interval outlives the test (four fake timers before the harness fix).
+		// heartbeat interval outlives the test (three fake timers before the harness fix).
 		resetSessions();
 		expect(vi.getTimerCount()).toBe(0);
 	});

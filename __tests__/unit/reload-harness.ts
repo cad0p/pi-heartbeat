@@ -50,8 +50,8 @@ export function sessionRegistry(): Map<string, RegistryEntry> {
  *
  * A standalone copy (a second activation on a key that is already live) is not in the registry: its entry is
  * created inside TimerManager.bind()->attach() and never registered, so disposing the registry alone left its
- * timers running into later tests. shutdown("quit") retires the entry; retire() only deletes a registry slot
- * that still holds that entry, so the live copy is untouched.
+ * timers running into later tests. shutdown("quit") disposes that activation's entry — a shared, adopted entry
+ * included — which is why teardown runs after a test's assertions; only the registry slot is ownership-checked.
  */
 export function resetSessions(): void {
 	for (const act of ACTIVATIONS.splice(0)) act.shutdown("quit");
