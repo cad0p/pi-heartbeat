@@ -80,9 +80,21 @@ describe("TimerManager", () => {
 		});
 
 		it("accepts the largest listable ids: 250 UTF-16 units, astral or not", () => {
-			manager.setTimer(10, "a", "\u{1F680}".repeat(125));
+			const astral = "\u{1F680}".repeat(125);
+			expect(astral.length).toBe(250);
+			manager.setTimer(10, "a", astral);
 			manager.setTimer(20, "b", "b".repeat(200));
-			expect(manager.getActiveTimerIds()).toEqual(["\u{1F680}".repeat(125), "b".repeat(200)]);
+			expect(manager.getActiveTimerIds()).toEqual([astral, "b".repeat(200)]);
+		});
+
+		it("refuses 251 units, one past the consumer's budget, even when the tool's limit admits the id", () => {
+			// 251 UTF-16 units but only 126 grapheme clusters: the schema's maxLength counts grapheme clusters,
+			// so the tool passes this id and the manager is the only layer that can keep the item inside 256 units.
+			const id = "\u{1F680}".repeat(125) + "b";
+			expect(id.length).toBe(251);
+
+			expect(() => manager.setTimer(10, "x", id)).toThrow("Timer id is 251 UTF-16 units long; at most 250 are allowed");
+			expect(manager.getActiveTimerIds()).toEqual([]);
 		});
 
 		it("lists active timer IDs", () => {

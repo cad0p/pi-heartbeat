@@ -84,14 +84,14 @@ const SESSIONS = Symbol.for("pi-heartbeat.sessions");
 /** How long a detached entry waits for the reloaded activation before it is retired. */
 const DETACH_GRACE_MS = 5 * 60_000;
 
-/** Timer ids the `timer` tool accepts: 1-200 chars, no edge whitespace, no control characters. */
+/** Timer ids the `timer` tool accepts: 1-200 grapheme clusters, no edge whitespace, no control characters. */
 export const TIMER_ID_MAX_LENGTH = 200;
 export const TIMER_ID_PATTERN = "^(?!\\s)(?![\\s\\S]*\\s$)[^\\x00-\\x1f\\x7f]+$";
 /**
  * Longest id the background-work consumer can list: its v1 item ids are capped at 256 UTF-16 units, and the
- * item is `timer:<id>`. The tool's `maxLength` counts code points, so it cannot enforce this: 200 astral
- * characters are 400 units. An over-long id was accepted and armed, but the provider skipped it, so a record
- * waiting only on that timer looked idle and could settle.
+ * item is `timer:<id>`. The tool's `maxLength` counts grapheme clusters (typebox 1.x, which the host compiles
+ * the schema with), so it cannot enforce this: 200 astral characters are 400 units. An over-long id was accepted
+ * and armed, but the provider skipped it, so a record waiting only on that timer looked idle and could settle.
  */
 export const MAX_LISTABLE_TIMER_ID_LENGTH = 256 - "timer:".length;
 
@@ -248,7 +248,7 @@ export class TimerManager {
 		const entry = this.session;
 		if (id !== undefined && id.length > MAX_LISTABLE_TIMER_ID_LENGTH) {
 			throw new Error(
-				`Timer id is ${id.length} UTF-16 units long; at most ${MAX_LISTABLE_TIMER_ID_LENGTH} are allowed, so the background-work item "timer:<id>" fits its 256-unit budget. The tool's 200-character limit counts code points, so an id of astral characters can pass it and still be refused here (each counts as two units).`,
+				`Timer id is ${id.length} UTF-16 units long; at most ${MAX_LISTABLE_TIMER_ID_LENGTH} are allowed, so the background-work item "timer:<id>" fits its 256-unit budget. The tool's 200-character limit counts grapheme clusters, so an id of astral characters can pass it and still be refused here.`,
 			);
 		}
 		const timerId = id ?? `timer-${++entry.timerCounter}`;

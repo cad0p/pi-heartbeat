@@ -1,5 +1,5 @@
 import { snapshotBackgroundWork } from "@cad0p/pi-background-work";
-import { Value } from "@sinclair/typebox/value";
+import { Compile } from "typebox/compile";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registry } from "../../src/timer-manager.js";
 import { activation, listedWork, resetBackgroundWork, resetSessions, sentContents } from "./reload-harness.js";
@@ -105,8 +105,10 @@ describe("background work: what the provider reports", () => {
 	it("(9) the timer tool schema rejects bad ids; a bad id that reaches the manager is skipped, not fatal", async () => {
 		const act = activation();
 		act.start("startup");
-		const schema = act.toolSchema("timer");
-		const accepts = (id: string) => Value.Check(schema, { seconds: 10, message: "x", id });
+		// The host compiles tool schemas with typebox 1.x, so validate with the same compiler rather than with
+		// typebox 0.34's Value.Check, which counts UTF-16 units and would not match the host's answer.
+		const schema = Compile(act.toolSchema("timer"));
+		const accepts = (id: string) => schema.Check({ seconds: 10, message: "x", id });
 
 		expect(accepts("build")).toBe(true);
 		expect(accepts("x".repeat(200))).toBe(true);
@@ -116,6 +118,13 @@ describe("background work: what the provider reports", () => {
 		expect(accepts("x".repeat(201))).toBe(false);
 		expect(accepts("a\u2028b")).toBe(true);
 		expect(accepts("a\u2028b ")).toBe(false);
+
+		// typebox 1.x's maxLength counts grapheme clusters: 200 astral characters are 400 UTF-16 units and
+		// still pass, 201 do not, and 251 units in 126 graphemes pass too. The manager's 250-unit refusal is
+		// therefore the layer that keeps "timer:<id>" inside the package's 256-unit budget.
+		expect(accepts("\u{1F680}".repeat(200))).toBe(true);
+		expect(accepts("\u{1F680}".repeat(201))).toBe(false);
+		expect(accepts("\u{1F680}".repeat(125) + "b")).toBe(true);
 
 		// The harness calls execute directly, bypassing the schema: the provider must still skip the bad id.
 		await act.setTimer(10, "x", " bad");
@@ -130,14 +139,42 @@ describe("background work: what the provider reports", () => {
 		await act.setTimer(60, "astral", "\u{1F680}".repeat(125));
 		await act.setTimer(60, "bmp", "b".repeat(200));
 		expect(listedWork(act.key).sort()).toEqual(["timer:" + "b".repeat(200), "timer:" + "\u{1F680}".repeat(125)]);
+
+		// The snapshot validates, so it would have thrown if an item passed 256 units. Asserting that the longest
+		// rendered item sits exactly on the cap pins the consumer's boundary against the manager's.
+		const items = snapshotBackgroundWork([act.key]).items;
+		expect(Math.max(...items.map((item) => item.id.length))).toBe(256);
+	});
+
+	it("(9e) the provider skips a 251-unit id, one unit past the item budget, on its own", async () => {
+		const act = activation();
+		act.start("startup");
+		// setTimer refuses this id, so write it into the entry directly: the provider's own bound has to hold,
+		// or the 257-unit item would make every snapshot throw instead of just hiding this timer.
+		const entry = registry().get(act.key);
+		if (!entry) {
+			throw new Error("no session entry");
+		}
+		const id = "\u{1F680}".repeat(125) + "b";
+		expect(id.length).toBe(251);
+		entry.timers.set(id, {
+			timeout: setTimeout(() => {}, 0),
+			seconds: 60,
+			message: "unreachable",
+			createdAt: new Date().toISOString(),
+			deadline: Date.now() + 60_000,
+		});
+		await act.setTimer(60, "ok", "good");
+
+		expect(() => listedWork(act.key)).not.toThrow();
+		expect(listedWork(act.key)).toEqual(["timer:good"]);
 	});
 
 	it("(9d) an astral id past the package's unit budget is refused before it is armed", async () => {
 		const act = activation();
 		act.start("startup");
-		// The schema's maxLength is enforced by whichever validator the host runs; JSON Schema semantics count
-		// code points, so 200 astral characters can pass a spec-compliant validator (400 UTF-16 units). The
-		// manager therefore enforces the unit budget itself, whatever layer let the id through.
+		// The host's validator counts grapheme clusters, so 200 astral characters pass the schema (400 UTF-16
+		// units). The manager therefore enforces the unit budget itself, whatever layer let the id through.
 		await expect(act.setTimer(10, "x", "\u{1F680}".repeat(200))).rejects.toThrow(/at most 250 are allowed/);
 		expect(listedWork(act.key)).toEqual([]);
 	});
