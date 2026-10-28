@@ -3,9 +3,15 @@
  * @cad0p/pi-background-work footer, instead of a bare item count.
  */
 
-import type { BackgroundWorkItem, DescribeContext } from "@cad0p/pi-background-work";
+import {
+	type BackgroundWorkItem,
+	type DescribeContext,
+	listBackgroundWorkDisplayProviders,
+	registerBackgroundWorkDisplayProvider,
+} from "@cad0p/pi-background-work";
 import { registry, type SessionEntry } from "./timer-manager.js";
 
+const PROVIDER_NAME = "pi-heartbeat";
 /** Longest segment, in graphemes, the footer keeps, the ellipsis included. */
 const MAX_SEGMENT = 48;
 /** A cut may not shorten a segment below this many graphemes. */
@@ -151,5 +157,31 @@ export function describeArmedWork(items: readonly BackgroundWorkItem[], context:
 		return parts.length === 0 ? null : capSegment(parts.join(" · "));
 	} catch {
 		return null;
+	}
+}
+
+function displayPresent(): boolean {
+	try {
+		return listBackgroundWorkDisplayProviders().some((provider) => provider.name === PROVIDER_NAME);
+	} catch {
+		// A malformed display provider from another extension makes the list throw. Treat that as absent so
+		// registration still runs: a same-name registration replaces the old one, so a re-register is harmless.
+		return false;
+	}
+}
+
+/**
+ * Registers the display provider once per process, beside the v1 provider. A reload replaces the
+ * existing registration; any other session start registers only when no pi-heartbeat display is
+ * present. The disposer is never called: other sessions in the process still need the provider.
+ */
+export function registerDisplayProvider(reason: string): void {
+	if (reason !== "reload" && displayPresent()) {
+		return;
+	}
+	try {
+		registerBackgroundWorkDisplayProvider({ name: PROVIDER_NAME, describe: describeArmedWork });
+	} catch {
+		// A malformed display registry must not break session binding.
 	}
 }
