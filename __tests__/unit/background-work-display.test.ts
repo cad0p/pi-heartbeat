@@ -120,6 +120,34 @@ describe("background work: the footer segment", () => {
 		expect(segment(act)).toBe("heartbeat 0:05");
 	});
 
+	it("(5d) the manager records each tick's wall-clock time", async () => {
+		const act = activation();
+		act.start("startup");
+		await act.startHeartbeat(10, "watch");
+		const entry = registry().get(act.key);
+		if (!entry?.heartbeat) {
+			throw new Error("no heartbeat");
+		}
+		expect(entry.heartbeat.state.lastTickAt).toBeUndefined();
+
+		vi.advanceTimersByTime(10_000);
+
+		expect(entry.heartbeat.state.lastTickAt).toBe(new Date().toISOString());
+	});
+
+	it("(5e) a corrupt createdAt reads 0:00, never NaN", async () => {
+		const act = activation();
+		act.start("startup");
+		await act.startHeartbeat(10, "watch");
+		const entry = registry().get(act.key);
+		if (!entry?.heartbeat) {
+			throw new Error("no heartbeat");
+		}
+		entry.heartbeat.state.createdAt = "not a date";
+
+		expect(segment(act)).toBe("heartbeat 0:00");
+	});
+
 	it("(6) a heartbeat and timers are joined with a middle dot", async () => {
 		const act = activation();
 		act.start("startup");
@@ -216,6 +244,47 @@ describe("background work: the footer segment", () => {
 		await act.setTimer(42, "x");
 		await act.setTimer(65, "y");
 		await act.setTimer(90, "z");
+		const entry = registry().get(act.key);
+		if (!entry) {
+			throw new Error("no entry");
+		}
+		entry.pending.push({ message: { customType: "x", content: "x", display: true, details: {} } });
+
+		const text = segment(act);
+		if (text === null) {
+			throw new Error("no segment");
+		}
+		expect(text.endsWith("· wake queued")).toBe(true);
+		expect([...text].filter((grapheme) => grapheme === "…")).toHaveLength(1);
+		expect([...segmenter.segment(text)].length).toBeLessThanOrEqual(48);
+	});
+
+	it("(12c) one long timer name keeps its clock and the wake behind it", async () => {
+		const act = activation();
+		act.start("startup");
+		await act.setTimer(42, "x", "check-build-42-with-a-very-long-name");
+		const entry = registry().get(act.key);
+		if (!entry) {
+			throw new Error("no entry");
+		}
+		entry.pending.push({ message: { customType: "x", content: "x", display: true, details: {} } });
+
+		const text = segment(act);
+		if (text === null) {
+			throw new Error("no segment");
+		}
+		expect(text.endsWith("· wake queued")).toBe(true);
+		expect(text.includes(" 0:42")).toBe(true);
+		expect([...text].filter((grapheme) => grapheme === "…")).toHaveLength(1);
+		expect([...segmenter.segment(text)].length).toBeLessThanOrEqual(48);
+	});
+
+	it("(12d) a timer list that would land on the budget keeps the wake and one ellipsis", async () => {
+		const act = activation();
+		act.start("startup");
+		await act.setTimer(42, "x", "buildz");
+		await act.setTimer(62, "y", "deploy");
+		await act.setTimer(87, "z", "watch");
 		const entry = registry().get(act.key);
 		if (!entry) {
 			throw new Error("no entry");

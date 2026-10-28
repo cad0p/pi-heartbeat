@@ -47,13 +47,26 @@ function capSegment(text: string): string {
  */
 function timerPart(tokens: string[], used: number, budget: number): string {
 	if (tokens.length === 1) {
-		return tokens[0];
+		const token = tokens[0];
+		if (used + graphemesOf(token).length <= budget) {
+			return token;
+		}
+		// One timer whose id alone fills the segment: keep the clock, cut the name. Returning the
+		// whole token would push the wake out and leave a dangling separator once the cap cuts.
+		const cut = token.lastIndexOf(" ");
+		const clock = cut === -1 ? "" : token.slice(cut + 1);
+		const id = cut === -1 ? token : token.slice(0, cut);
+		const room = Math.max(1, budget - used - graphemesOf(clock).length - 2);
+		return `${graphemesOf(id).slice(0, room).join("").trimEnd()}… ${clock}`;
 	}
 	const head = `${tokens.length} timers: `;
 	const kept: string[] = [];
 	for (const token of tokens) {
 		const candidate = `${head}${[...kept, token].join(", ")}`;
-		if (used + graphemesOf(candidate).length > budget) {
+		// The "…" a cut appends is part of the segment: a list landing exactly on the budget
+		// would otherwise exceed it and be cut a second time, taking the wake with it.
+		const ellipsis = kept.length + 1 < tokens.length ? 1 : 0;
+		if (used + graphemesOf(candidate).length + ellipsis > budget) {
 			break;
 		}
 		kept.push(token);
@@ -90,6 +103,9 @@ function heartbeatToken(entry: SessionEntry, nowMs: number): string {
 	}
 	const intervalMs = Math.max(1, state.intervalSeconds) * 1000;
 	const createdAt = Date.parse(state.createdAt);
+	if (!Number.isFinite(createdAt)) {
+		return `heartbeat ${remaining(nowMs, nowMs)}`;
+	}
 	const lastTickAt = state.lastTickAt === undefined ? Number.NaN : Date.parse(state.lastTickAt);
 	const deadline = Number.isFinite(lastTickAt)
 		? lastTickAt + intervalMs
