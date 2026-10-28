@@ -76,7 +76,7 @@ describe("reload survival: lifecycle", () => {
 		expect(act.sendMessage).not.toHaveBeenCalled();
 	});
 
-	it("(11) a detach with no adoption within 5 minutes retires the entry and stops the heartbeat", async () => {
+	it("(11) a detach with no adoption within 5 minutes retires the entry; a late reload re-arms from the log", async () => {
 		const before = activation();
 		before.start("startup");
 		await before.setTimer(600, "far");
@@ -88,10 +88,14 @@ describe("reload survival: lifecycle", () => {
 		vi.advanceTimersByTime(1);
 		expect(sessionRegistry().has(before.key)).toBe(false);
 
+		// Grace expiry is a deferral, not a discard: retiring writes no clear, so the log is the
+		// authority again and the reload that arrives late recovers the timer at its original deadline.
 		const late = activation(before.key);
 		late.start("reload");
-		vi.advanceTimersByTime(60_000);
-		expect(late.sendMessage).not.toHaveBeenCalled();
+		expect(sentContents(late)).toEqual([expect.stringContaining("resumed after pi was not running")]);
+
+		vi.advanceTimersByTime(300_000);
+		expect(sentContents(late)).toContainEqual(expect.stringContaining("fired (after 600s): far"));
 	});
 
 	it("(14) a child session reloading does not touch the main session's timers", async () => {
