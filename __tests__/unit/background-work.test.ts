@@ -162,7 +162,6 @@ describe("background work: what the provider reports", () => {
 			seconds: 60,
 			message: "unreachable",
 			createdAt: new Date().toISOString(),
-			deadline: Date.now() + 60_000,
 		});
 		await act.setTimer(60, "ok", "good");
 
