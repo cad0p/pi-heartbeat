@@ -15,4 +15,8 @@ All notable changes to this project will be documented in this file.
 - Report armed timers and the heartbeat as background work (closes #11) ([#12](https://github.com/cad0p/pi-heartbeat/pull/12))
 - Describe armed timers and the heartbeat in the background-work footer (closes #13) ([#14](https://github.com/cad0p/pi-heartbeat/pull/14))
 
+### 🐛 Bug Fixes
+
+- *(timer)* Refuse ids the consumer cannot list, and clear the #10 follow-ups (closes #10) ([#15](https://github.com/cad0p/pi-heartbeat/pull/15))
+
 
