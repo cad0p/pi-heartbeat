@@ -9,7 +9,7 @@ importers:
   .:
     dependencies:
       '@cad0p/pi-background-work':
-        specifier: '>=0.0.1-20261028.1 <0.0.1'
+        specifier: '>=0.0.1-20261028.1 <1.0.0'
         version: 0.0.1-20261028.1(@earendil-works/pi-coding-agent@0.84.1(supports-color@7.2.0)(ws@8.21.1)(zod@4.4.3))
     devDependencies:
       '@changesets/cli':
