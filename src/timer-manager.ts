@@ -22,6 +22,12 @@ export interface HeartbeatState {
 	message: string;
 	tick: number;
 	createdAt: string;
+	/**
+	 * Wall-clock of the last tick. `tick` counts `setInterval` callbacks, and Node coalesces the
+	 * ones it misses during a stall, so `tick` lags real time forever after one. Optional: an entry
+	 * written before this field existed has none, and readers fall back.
+	 */
+	lastTickAt?: string;
 }
 
 type OutgoingMessage = {
@@ -291,6 +297,7 @@ export class TimerManager {
 
 		const interval = setInterval(() => {
 			state.tick++;
+			state.lastTickAt = new Date().toISOString();
 			send(entry, {
 				heartbeatId: state.id,
 				message: {
