@@ -89,6 +89,37 @@ describe("background work: the footer segment", () => {
 		expect(segment(act)).toBe("heartbeat 1:00");
 	});
 
+	it("(5b) a heartbeat whose callbacks were coalesced counts from the last tick, not from the lagging counter", async () => {
+		const act = activation();
+		act.start("startup");
+		await act.startHeartbeat(10, "watch");
+		const entry = registry().get(act.key);
+		if (!entry?.heartbeat) {
+			throw new Error("no heartbeat");
+		}
+		// A 25 s stall: the counter advanced once, and the coalesced callback ran a second ago.
+		entry.heartbeat.state.tick = 1;
+		entry.heartbeat.state.lastTickAt = new Date(Date.now() - 1_000).toISOString();
+
+		expect(segment(act)).toBe("heartbeat 0:09");
+	});
+
+	it("(5c) a heartbeat written before lastTickAt existed aligns to the next boundary instead of 0:00", async () => {
+		const act = activation();
+		act.start("startup");
+		await act.startHeartbeat(10, "watch");
+		const entry = registry().get(act.key);
+		if (!entry?.heartbeat) {
+			throw new Error("no heartbeat");
+		}
+		// Old entry: no timestamp, and the counter lagged behind the 15 s that passed.
+		Reflect.deleteProperty(entry.heartbeat.state, "lastTickAt");
+		entry.heartbeat.state.tick = 0;
+		vi.setSystemTime(new Date(Date.now() + 15_000));
+
+		expect(segment(act)).toBe("heartbeat 0:05");
+	});
+
 	it("(6) a heartbeat and timers are joined with a middle dot", async () => {
 		const act = activation();
 		act.start("startup");
@@ -177,6 +208,27 @@ describe("background work: the footer segment", () => {
 
 		const items = snapshotBackgroundWork([own.key, other.key]).items;
 		expect(describeArmedWork(items, { sessionId: own.key, sessionIds: [own.key], nowMs: Date.now() })).toBe("build 0:42");
+	});
+
+	it("(12b) a queued wake survives next to three timers, with one ellipsis and inside the cap", async () => {
+		const act = activation();
+		act.start("startup");
+		await act.setTimer(42, "x");
+		await act.setTimer(65, "y");
+		await act.setTimer(90, "z");
+		const entry = registry().get(act.key);
+		if (!entry) {
+			throw new Error("no entry");
+		}
+		entry.pending.push({ message: { customType: "x", content: "x", display: true, details: {} } });
+
+		const text = segment(act);
+		if (text === null) {
+			throw new Error("no segment");
+		}
+		expect(text.endsWith("· wake queued")).toBe(true);
+		expect([...text].filter((grapheme) => grapheme === "…")).toHaveLength(1);
+		expect([...segmenter.segment(text)].length).toBeLessThanOrEqual(48);
 	});
 
 	it("(13) three timers never exceed the footer's 48-grapheme segment", async () => {

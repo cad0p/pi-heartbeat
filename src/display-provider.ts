@@ -45,7 +45,7 @@ function capSegment(text: string): string {
  * The timers part, keeping whole entries within the segment limit; an ellipsis marks the ones
  * dropped, so the count always survives a cut.
  */
-function timerPart(tokens: string[], used: number): string {
+function timerPart(tokens: string[], used: number, budget: number): string {
 	if (tokens.length === 1) {
 		return tokens[0];
 	}
@@ -53,7 +53,7 @@ function timerPart(tokens: string[], used: number): string {
 	const kept: string[] = [];
 	for (const token of tokens) {
 		const candidate = `${head}${[...kept, token].join(", ")}`;
-		if (used + graphemesOf(candidate).length > MAX_SEGMENT) {
+		if (used + graphemesOf(candidate).length > budget) {
 			break;
 		}
 		kept.push(token);
@@ -74,10 +74,26 @@ function timerToken(entry: SessionEntry, id: string, nowMs: number): string {
 	return `${id} ${remaining(deadline, nowMs)}`;
 }
 
-/** The heartbeat reads the time to its next tick. */
+/**
+ * The heartbeat reads the time to its next tick.
+ *
+ * The base is the last tick's own timestamp, not `tick`: that counter advances once per
+ * `setInterval` callback, and Node coalesces the callbacks it misses during a stall, so after one
+ * the counter lags real time forever and the countdown pinned at `0:00` while the heartbeat was
+ * alive. An entry written before `lastTickAt` existed falls back to the next boundary after
+ * `createdAt`, which is never in the past either.
+ */
 function heartbeatToken(entry: SessionEntry, nowMs: number): string {
 	const state = entry.heartbeat?.state;
-	const deadline = state === undefined ? nowMs : Date.parse(state.createdAt) + (state.tick + 1) * state.intervalSeconds * 1000;
+	if (state === undefined) {
+		return `heartbeat ${remaining(nowMs, nowMs)}`;
+	}
+	const intervalMs = Math.max(1, state.intervalSeconds) * 1000;
+	const createdAt = Date.parse(state.createdAt);
+	const lastTickAt = state.lastTickAt === undefined ? Number.NaN : Date.parse(state.lastTickAt);
+	const deadline = Number.isFinite(lastTickAt)
+		? lastTickAt + intervalMs
+		: createdAt + (Math.floor((nowMs - createdAt) / intervalMs) + 1) * intervalMs;
 	return `heartbeat ${remaining(deadline, nowMs)}`;
 }
 
@@ -155,19 +171,22 @@ export function describeArmedWork(items: readonly BackgroundWorkItem[], context:
 				}
 			}
 		}
+		const wakeText = wakes === 0 ? undefined : wakes === 1 ? "wake queued" : `${wakes} wakes queued`;
 		const parts: string[] = [];
 		if (heartbeat !== undefined) {
 			parts.push(heartbeat);
 		}
 		const tokens = [...timers.values()];
 		if (tokens.length > 0) {
-			// The separator counts too when a heartbeat already leads the segment.
-			parts.push(timerPart(tokens, graphemesOf(parts.join(" · ")).length + (parts.length > 0 ? 3 : 0)));
+			// The separator counts too when a heartbeat already leads the segment, and the timers may not
+			// spend the room the wake text needs: without the reservation the cap cuts the wake away and
+			// leaves a second ellipsis in the timers' own.
+			const used = graphemesOf(parts.join(" · ")).length + (parts.length > 0 ? 3 : 0);
+			const reserved = wakeText === undefined ? 0 : graphemesOf(wakeText).length + 3;
+			parts.push(timerPart(tokens, used, MAX_SEGMENT - reserved));
 		}
-		if (wakes === 1) {
-			parts.push("wake queued");
-		} else if (wakes > 1) {
-			parts.push(`${wakes} wakes queued`);
+		if (wakeText !== undefined) {
+			parts.push(wakeText);
 		}
 		return parts.length === 0 ? null : capSegment(parts.join(" · "));
 	} catch {
