@@ -1,7 +1,7 @@
 {
   "name": "@cad0p/pi-heartbeat",
   "version": "0.0.1",
-  "description": "Non-blocking timers and heartbeats for pi agents — stop using sleep",
+  "description": "Non-blocking timers and heartbeats for pi agents \u2014 stop using sleep",
   "author": "Marc Fargas",
   "license": "MIT",
   "type": "module",
@@ -38,7 +38,7 @@
     ]
   },
   "dependencies": {
-    "@cad0p/pi-background-work": ">=0.0.1 <1.0.0"
+    "@cad0p/pi-background-work": ">=0.0.1-20261028.1 <0.0.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.84.0"
@@ -51,16 +51,16 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.29.3",
+    "@earendil-works/pi-coding-agent": "^0.84.0",
     "@eslint/js": "^9.27.0",
+    "@marcfargas/pi-test-harness": "^0.4.1",
     "@sinclair/typebox": "^0.34.0",
     "eslint": "^9.27.0",
     "globals": "^16.1.0",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.32.1",
-    "vitest": "^3.1.4",
-    "@changesets/cli": "^2.29.3",
-    "@marcfargas/pi-test-harness": "^0.4.1",
-    "@earendil-works/pi-coding-agent": "^0.84.0"
+    "vitest": "^3.1.4"
   },
   "engines": {
     "node": ">=22.19.0"
