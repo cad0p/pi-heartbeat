@@ -41,6 +41,26 @@ function capSegment(text: string): string {
 	return `${graphemes.slice(0, MAX_SEGMENT - 1).join("")}…`;
 }
 
+/**
+ * The timers part, keeping whole entries within the segment limit; an ellipsis marks the ones
+ * dropped, so the count always survives a cut.
+ */
+function timerPart(tokens: string[], used: number): string {
+	if (tokens.length === 1) {
+		return tokens[0];
+	}
+	const head = `${tokens.length} timers: `;
+	const kept: string[] = [];
+	for (const token of tokens) {
+		const candidate = `${head}${[...kept, token].join(", ")}`;
+		if (used + graphemesOf(candidate).length > MAX_SEGMENT) {
+			break;
+		}
+		kept.push(token);
+	}
+	return kept.length === tokens.length ? `${head}${kept.join(", ")}` : `${head}${kept.join(", ")}…`;
+}
+
 /** Time left until `deadlineMs` as `M:SS`; `0:00` once it has passed. */
 function remaining(deadlineMs: number, nowMs: number): string {
 	const seconds = Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
@@ -144,10 +164,9 @@ export function describeArmedWork(items: readonly BackgroundWorkItem[], context:
 			parts.push(heartbeat);
 		}
 		const tokens = [...timers.values()];
-		if (tokens.length === 1) {
-			parts.push(tokens[0]);
-		} else if (tokens.length > 1) {
-			parts.push(`${tokens.length} timers: ${tokens.join(", ")}`);
+		if (tokens.length > 0) {
+			// The separator counts too when a heartbeat already leads the segment.
+			parts.push(timerPart(tokens, graphemesOf(parts.join(" · ")).length + (parts.length > 0 ? 3 : 0)));
 		}
 		if (wakes === 1) {
 			parts.push("wake queued");
