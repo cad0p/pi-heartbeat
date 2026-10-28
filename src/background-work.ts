@@ -21,7 +21,7 @@ const MAX_ITEMS = 10_000;
  * Edge whitespace is checked on the raw id, since the "timer:" prefix would hide it from the package.
  * Control characters are rejected as the timer tool's schema does.
  */
-function isListableTimerId(id: string): boolean {
+export function isListableTimerId(id: string): boolean {
 	return (
 		id.length > 0 &&
 		id.trim() === id &&
