@@ -211,6 +211,15 @@ export function currentOwner(): PersistOwner {
 }
 
 /**
+ * Are these the same process? pid, boot id and start marker are its whole identity; `uptime` is a snapshot
+ * taken when the record was written and is not part of it. An unknown start marker on both sides matches,
+ * because there is nothing to tell them apart.
+ */
+export function sameOwner(a: PersistOwner, b: PersistOwner): boolean {
+	return a.pid === b.pid && a.boot === b.boot && a.start === b.start;
+}
+
+/**
  * Is the recorded owner still the process that wrote the record? Ordered cheapest and most decisive
  * first, and every answer that cannot be read counts as alive.
  *

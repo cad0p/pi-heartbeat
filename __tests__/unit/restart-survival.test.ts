@@ -1,19 +1,27 @@
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { snapshotBackgroundWork } from "@cad0p/pi-background-work";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { describeArmedWork } from "../../src/display-provider.js";
+import { type PersistOwner, ownerAlive, systemProbe } from "../../src/process-identity.js";
 import { HEARTBEAT_STATE_ENTRY } from "../../src/session-state.js";
 import {
 	type Activation,
 	activation,
 	crash,
+	deadOwner,
 	journal,
 	listedWork,
 	liveOwner,
 	resetBackgroundWork,
 	resetSessions,
 	restart,
+	sessionRegistry,
 	sentContents,
+	setSessionFile,
 	stateOps,
 	stateRecords,
 } from "./reload-harness.js";
@@ -31,6 +39,25 @@ function restartAfter(key: string, deadForMs: number): Activation {
 	const act = activation(key);
 	act.start("startup");
 	return act;
+}
+
+/**
+ * An identity that is alive but is not this process: a child we spawn and kill ourselves, so the premise
+ * of a liveness test cannot depend on the CI host. `ownerAlive` must agree, or the owner would be restored
+ * for the wrong reason.
+ */
+async function liveForeignOwner(): Promise<{ owner: PersistOwner; stop: () => void }> {
+	const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+	const pid = child.pid ?? 0;
+	// The tests run on fake timers, so the wait for the child to appear is synchronous.
+	const sleeper = new Int32Array(new SharedArrayBuffer(4));
+	for (let i = 0; i < 200 && systemProbe().answer(pid) !== "present"; i++) {
+		Atomics.wait(sleeper, 0, 0, 5);
+	}
+	const probe = systemProbe();
+	const owner: PersistOwner = { pid, boot: probe.boot(), start: probe.inspect(pid)?.start, uptime: 0 };
+	expect(ownerAlive(owner)).toBe(true);
+	return { owner, stop: () => child.kill("SIGKILL") };
 }
 
 /** Append a record to a key's log by hand, as a previous process would have left it. */
@@ -322,5 +349,166 @@ describe("restart survival: replay and recovery", () => {
 
 		vi.advanceTimersByTime(120_000);
 		expect(sentContents(fork)).toEqual([]);
+	});
+
+	it("(16) a clear cancels only the work that activation held, so a second process's quit keeps the log", async () => {
+		const key = randomUUID();
+		seed(key, {
+			v: 1,
+			op: "arm",
+			at: NOW,
+			owner: liveOwner(),
+			timer: { id: "timer-1", seconds: 600, message: "live", createdAt: NOW },
+		});
+
+		// A second process on the same session file: the registry is per process, so it replays and defers
+		// the work this one owns. It holds nothing of its own.
+		const second = activation(key);
+		second.start("startup");
+		expect(stateOps(key)).toEqual(["arm"]);
+
+		second.shutdown("quit");
+		expect(stateOps(key)).toEqual(["arm", "clear"]);
+		expect(stateRecords(key).at(-1)).toMatchObject({ op: "clear", reason: "shutdown", timers: [], heartbeat: false });
+
+		// The owner then dies for real, and the next process still finds the timer it left behind.
+		crash(key);
+		const third = activation(key);
+		third.start("startup");
+		vi.advanceTimersByTime(600_000);
+		expect(sentContents(third)).toEqual([expect.stringContaining("fired (after 600s): live")]);
+	});
+
+	it("(17) force does not take work from another live process", async () => {
+		const { owner, stop } = await liveForeignOwner();
+		try {
+			const key = randomUUID();
+			seed(key, {
+				v: 1,
+				op: "arm",
+				at: NOW,
+				owner,
+				timer: { id: "timer-1", seconds: 60, message: "theirs", createdAt: NOW },
+			});
+
+			// A reload whose detach entry expired, with another live process's work in the log.
+			const act = activation(key);
+			act.start("reload");
+			vi.advanceTimersByTime(120_000);
+
+			expect(sentContents(act)).toEqual([]);
+			expect(stateOps(key)).toEqual(["arm"]);
+		} finally {
+			stop();
+		}
+	});
+
+	it("(18) a re-arm claims ownership, so a third process does not count it down too", async () => {
+		const first = activation();
+		first.start("startup");
+		await first.setTimer(600, "x");
+
+		const second = restart(first.key);
+		// The re-arm is written with the new owner; without that, the log still names a dead process and a
+		// third one would arm the same timer again, waking twice.
+		expect(stateOps(first.key)).toEqual(["arm", "arm"]);
+
+		sessionRegistry().clear();
+		const third = activation(first.key);
+		third.start("startup");
+		expect(stateOps(first.key)).toEqual(["arm", "arm"]);
+
+		vi.advanceTimersByTime(600_000);
+		expect(stateOps(first.key)).toEqual(["arm", "arm", "fire"]);
+		expect(sentContents(third)).toEqual([]);
+		expect(sentContents(second)).toEqual([expect.stringContaining("fired (after 600s): x")]);
+	});
+
+	it("(19) a restored heartbeat derives its boundary from lastTickAt, not from the tick count", async () => {
+		const key = randomUUID();
+		const created = Date.parse(NOW);
+		seed(key, {
+			v: 1,
+			op: "heartbeat",
+			at: NOW,
+			owner: deadOwner(),
+			action: "start",
+			heartbeat: {
+				id: 1,
+				intervalSeconds: 60,
+				message: "hb",
+				tick: 3,
+				createdAt: NOW,
+				lastTickAt: new Date(created + 60_000).toISOString(),
+			},
+		});
+
+		// 90 s on: the boundary (last tick + one interval) is 30 s away. Counting three ticks from createdAt
+		// instead would put it 150 s away, which is the delay a mutated formula produces.
+		vi.advanceTimersByTime(90_000);
+		const act = activation(key);
+		act.start("startup");
+		expect(sentContents(act)).toEqual([]);
+
+		vi.advanceTimersByTime(29_000);
+		expect(sentContents(act)).toEqual([]);
+		vi.advanceTimersByTime(1_000);
+		expect(sentContents(act)).toEqual([expect.stringContaining("Heartbeat #1 tick 4 (every 60s): hb")]);
+	});
+
+	it("(20) overdue timers are delivered oldest first, whatever order the log holds them in", async () => {
+		const key = randomUUID();
+		const later = new Date(Date.parse(NOW) + 40_000).toISOString();
+		// Fold order is timer-2 then timer-1; due order is timer-1 (NOW+10 s) then timer-2 (NOW+60 s).
+		seed(key, {
+			v: 1,
+			op: "arm",
+			at: NOW,
+			owner: deadOwner(),
+			timer: { id: "timer-2", seconds: 20, message: "second", createdAt: later },
+		});
+		seed(key, {
+			v: 1,
+			op: "arm",
+			at: NOW,
+			owner: deadOwner(),
+			timer: { id: "timer-1", seconds: 10, message: "first", createdAt: NOW },
+		});
+
+		vi.advanceTimersByTime(120_000);
+		const act = activation(key);
+		act.start("startup");
+		vi.advanceTimersByTime(0);
+
+		const [content] = sentContents(act);
+		expect(content).toContain("2 timers fired while pi was not running");
+		expect(content.indexOf("- timer-1:")).toBe(0 + content.indexOf("- "));
+		expect(content.indexOf("- timer-1:")).toBeLessThan(content.indexOf("- timer-2:"));
+	});
+
+	it("(21) session_start repairs a torn last line before the first record is written", async () => {
+		const key = randomUUID();
+		const file = join(tmpdir(), `pi-heartbeat-torn-${key}.jsonl`);
+		const header = '{"type":"session","version":3}';
+		writeFileSync(file, `${header}\n{"type":"custom","customType":"pi-heartbeat.state"`);
+		setSessionFile(key, file);
+		try {
+			const act = activation(key);
+			act.start("startup");
+			expect(readFileSync(file, "utf8")).toBe(`${header}\n{"type":"custom","customType":"pi-heartbeat.state"\n`);
+		} finally {
+			rmSync(file, { force: true });
+		}
+	});
+
+	it("(22) the heartbeat number continues after a restart", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(60, "hb");
+		await before.stopHeartbeat();
+
+		const after = restart(before.key);
+		await after.startHeartbeat(30, "again");
+		expect(stateRecords(before.key).at(-1)).toMatchObject({ op: "heartbeat", action: "start", heartbeat: { id: 2 } });
 	});
 });

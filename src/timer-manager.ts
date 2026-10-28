@@ -176,8 +176,21 @@ function writeRecord(entry: SessionEntry, record: TimerStateRecord): void {
 	}
 }
 
-function clearRecord(reason: ClearReason): TimerStateRecord {
-	return { v: HEARTBEAT_STATE_VERSION, op: "clear", at: new Date().toISOString(), owner: currentOwner(), reason };
+/**
+ * A clear that names what it cancels. A shutdown or a user cancel only ever cancels the work this
+ * activation is holding, so a second process on the same session file — which holds none of it — cannot
+ * erase the log of the process that does.
+ */
+function clearRecord(entry: SessionEntry, reason: ClearReason): TimerStateRecord {
+	return {
+		v: HEARTBEAT_STATE_VERSION,
+		op: "clear",
+		at: new Date().toISOString(),
+		owner: currentOwner(),
+		reason,
+		timers: [...entry.timers.keys()],
+		heartbeat: entry.heartbeat !== undefined,
+	};
 }
 
 /** A `heartbeat start`, which both claims ownership and records the tick the next boundary derives from. */
@@ -379,13 +392,16 @@ export class TimerManager {
 	 * not keep the in-memory timers alive.
 	 */
 	end(): void {
-		writeRecord(this.session, clearRecord("shutdown"));
+		writeRecord(this.session, clearRecord(this.session, "shutdown"));
 		retire(this.sessionKey, this.session);
 	}
 
-	/** Append a `clear` for the whole log: a fork inherits nothing, and only a crash leaves work behind. */
-	persistClear(reason: ClearReason): void {
-		writeRecord(this.session, clearRecord(reason));
+	/**
+	 * session_start{fork}: `/fork` copies this branch's custom entries into a new file, so the fork empties
+	 * its own copy — a clear with no `timers` — before it replays. The parent file keeps its own.
+	 */
+	clearInherited(): void {
+		writeRecord(this.session, { v: HEARTBEAT_STATE_VERSION, op: "clear", at: new Date().toISOString(), owner: currentOwner(), reason: "fork" });
 	}
 
 	/**
@@ -559,8 +575,10 @@ export class TimerManager {
 
 	clearAll(): void {
 		const entry = this.session;
+		// Named before the in-memory state goes, so the record says what the user cancelled.
+		const record = clearRecord(entry, "user");
 		clearArmed(entry);
-		writeRecord(entry, clearRecord("user"));
+		writeRecord(entry, record);
 	}
 
 	// ── Internals: arming, firing, recovery ─────────────────────────

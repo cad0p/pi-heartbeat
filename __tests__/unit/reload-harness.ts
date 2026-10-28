@@ -98,6 +98,19 @@ export function resetSessions(): void {
 /** An owner that no probe can find alive: dead pid, and a boot id no host reports. */
 const DEAD_OWNER: PersistOwner = { pid: 999999, boot: "dead", start: "0", uptime: 0 };
 
+/** A dead owner, for a record seeded by hand as a previous process would have left it. */
+export function deadOwner(): PersistOwner {
+	return { ...DEAD_OWNER };
+}
+
+/** Session files by key, for the one test that needs a real file behind `getSessionFile()`. */
+const SESSION_FILES = new Map<string, string>();
+
+/** Point one key's `sessionManager.getSessionFile()` at a real path. */
+export function setSessionFile(key: string, file: string): void {
+	SESSION_FILES.set(key, file);
+}
+
 function holdsOwner(value: unknown): value is { owner: PersistOwner } {
 	return typeof value === "object" && value !== null && "owner" in value;
 }
@@ -162,7 +175,7 @@ export function activation(key: string = randomUUID()): Activation {
 	const ctx = {
 		sessionManager: {
 			getSessionId: () => key,
-			getSessionFile: () => undefined,
+			getSessionFile: () => SESSION_FILES.get(key),
 			// Root->leaf, as pi returns it: an entry appended now is visible to the next call.
 			getBranch: () => [...journal(key)],
 		},

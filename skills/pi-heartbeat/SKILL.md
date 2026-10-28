@@ -70,9 +70,9 @@ Timers and the heartbeat are written to the session, so a new pi process picks t
   ```
 
   Several arrive in one message, one line each, oldest first. There is no age bound: the agent sees the timer is stale and decides. The user can press Esc to stop that turn.
-- the heartbeat resumes with one catch-up ping if a tick was missed, and its tick count continues
+- the heartbeat resumes with one catch-up ping if a tick was missed, then its normal interval from the last tick it recorded. The number continues; the tick count picks up where it left off after a `/reload`, and after a crash from the last tick the session recorded
 
-Quitting pi (`quit`, `new`, `resume`, `fork`) clears them, so a deliberate quit fires nothing, and a `/fork` starts with no timers of its own.
+Quitting pi (`quit`, `new`, `resume`) clears the timers and heartbeat that process was holding, so a deliberate quit fires nothing and a second pi process on the same session cannot cancel yours. A `/fork` starts with no timers of its own.
 
 ## Commands
 

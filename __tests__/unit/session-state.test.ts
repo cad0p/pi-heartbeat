@@ -137,7 +137,7 @@ describe("session state: replay", () => {
 		expect(result.invalid).toBe(0);
 	});
 
-	it("(8) a live owner is deferred, and force ignores it", () => {
+	it("(8) a live owner is deferred, and force overrides it only for the records it names", () => {
 		const live: PersistOwner = { pid: 777, boot: "boot-a", start: "100", uptime: 5 };
 		const alive = { alive: (owner: PersistOwner) => owner.pid === live.pid };
 		const branch = [arm("timer-1", 60, AT, live), heartbeatStart(2, 0, live)];
@@ -148,10 +148,49 @@ describe("session state: replay", () => {
 		expect(deferred.deferred).toBe(2);
 		expect(deferred.invalid).toBe(0);
 
-		const forced = replaySessionState(branch, { ...alive, force: true });
-		expect(forced.timers.map((timer) => timer.id)).toEqual(["timer-1"]);
-		expect(forced.heartbeat?.id).toBe(2);
-		expect(forced.deferred).toBe(0);
+		const mine = replaySessionState(branch, { ...alive, force: (owner) => owner.pid === live.pid });
+		expect(mine.timers.map((timer) => timer.id)).toEqual(["timer-1"]);
+		expect(mine.heartbeat?.id).toBe(2);
+		expect(mine.deferred).toBe(0);
+
+		// A predicate naming another process leaves this one's work alone: a reload can only reclaim its own.
+		const theirs = replaySessionState(branch, { ...alive, force: (owner) => owner.pid !== live.pid });
+		expect(theirs.timers).toEqual([]);
+		expect(theirs.heartbeat).toBeUndefined();
+		expect(theirs.deferred).toBe(2);
+	});
+
+	it("(9) a clear cancels the work it names, and one with no timers empties the branch", () => {
+		const named = replaySessionState(
+			[
+				arm("timer-1"),
+				arm("timer-2"),
+				heartbeatStart(1),
+				entry({ v: 1, op: "clear", at: AT, owner: OWNER, reason: "shutdown", timers: ["timer-2"], heartbeat: true }),
+			],
+			DEAD,
+		);
+		// Only the timer it named is gone; the one a second process never held survives, and its heartbeat
+		// still stopped because that one it did hold.
+		expect(named.timers.map((timer) => timer.id)).toEqual(["timer-1"]);
+		expect(named.heartbeat).toBeUndefined();
+		expect(named.invalid).toBe(0);
+
+		const emptied = replaySessionState([arm("timer-1"), heartbeatStart(1), cleared("fork")], DEAD);
+		expect(emptied.timers).toEqual([]);
+		expect(emptied.heartbeat).toBeUndefined();
+	});
+
+	it("(10) a malformed timers list or heartbeat flag costs the record, not the replay", () => {
+		const broken = [
+			{ v: 1, op: "clear", at: AT, owner: OWNER, reason: "shutdown", timers: "timer-1" },
+			{ v: 1, op: "clear", at: AT, owner: OWNER, reason: "shutdown", timers: ["ok", 7] },
+			{ v: 1, op: "clear", at: AT, owner: OWNER, reason: "shutdown", timers: [], heartbeat: "yes" },
+		];
+		const result = replaySessionState([...broken.map(entry), arm("timer-1")], DEAD);
+
+		expect(result.invalid).toBe(broken.length);
+		expect(result.timers.map((timer) => timer.id)).toEqual(["timer-1"]);
 	});
 });
 

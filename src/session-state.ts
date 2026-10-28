@@ -60,7 +60,17 @@ export type TimerStateRecord =
 			heartbeat: HeartbeatStateData;
 	  }
 	| { v: typeof HEARTBEAT_STATE_VERSION; op: "heartbeat"; at: string; owner: PersistOwner; action: "stop"; id: number }
-	| { v: typeof HEARTBEAT_STATE_VERSION; op: "clear"; at: string; owner: PersistOwner; reason: ClearReason };
+	| {
+			v: typeof HEARTBEAT_STATE_VERSION;
+			op: "clear";
+			at: string;
+			owner: PersistOwner;
+			reason: ClearReason;
+			/** The timers this clear cancels. Absent, it cancels every timer in the branch (a fork's copy). */
+			timers?: string[];
+			/** Whether it also stops the heartbeat. */
+			heartbeat?: boolean;
+	  };
 
 /** A timer the log still holds armed. */
 export interface RestoredTimer extends TimerState {
@@ -94,8 +104,12 @@ export interface ReplayableEntry {
 export type OwnerCheck = (owner: PersistOwner) => boolean;
 
 export interface ReplayOptions {
-	/** Restore even work a live process still owns: a reload whose detach entry expired. */
-	force?: boolean;
+	/**
+	 * Which records to restore even though their owner reads as alive: a reload whose detach entry expired,
+	 * where the recorded pid is this very process and nobody else is counting the work down. Scoped to the
+	 * caller's own records, so it can never take work from another live process.
+	 */
+	force?: OwnerCheck;
 	/** Liveness, injectable for tests. */
 	alive?: OwnerCheck;
 }
@@ -149,6 +163,34 @@ function parseArm(data: Record<string, unknown>, at: string, owner: PersistOwner
 	return { v: HEARTBEAT_STATE_VERSION, op: "arm", at, owner, timer: { id, seconds, message, createdAt } };
 }
 
+/**
+ * A clear names what it cancels, because a shutdown can only cancel the work that activation was holding:
+ * a second process on the same session file holds none of it and must not wipe the log of the process that
+ * does. A clear without `timers` empties the branch instead, which is what a fork writes for the parent's
+ * copied log.
+ */
+function parseClear(data: Record<string, unknown>, at: string, owner: PersistOwner): TimerStateRecord | undefined {
+	const { reason, timers, heartbeat } = data;
+	if (reason !== "shutdown" && reason !== "fork" && reason !== "user") {
+		return undefined;
+	}
+	if (timers !== undefined && (!Array.isArray(timers) || !timers.every((id) => typeof id === "string"))) {
+		return undefined;
+	}
+	if (heartbeat !== undefined && typeof heartbeat !== "boolean") {
+		return undefined;
+	}
+	return {
+		v: HEARTBEAT_STATE_VERSION,
+		op: "clear",
+		at,
+		owner,
+		reason,
+		...(timers === undefined ? {} : { timers: [...timers] }),
+		...(heartbeat === undefined ? {} : { heartbeat }),
+	};
+}
+
 function parseHeartbeatStart(data: Record<string, unknown>, at: string, owner: PersistOwner): TimerStateRecord | undefined {
 	const heartbeat = data.heartbeat;
 	if (!isRecord(heartbeat)) {
@@ -198,9 +240,7 @@ function parseRecord(data: unknown): TimerStateRecord | undefined {
 				? { v: HEARTBEAT_STATE_VERSION, op: "heartbeat", at, owner, action: "stop", id: data.id }
 				: undefined;
 		case "clear":
-			return data.reason === "shutdown" || data.reason === "fork" || data.reason === "user"
-				? { v: HEARTBEAT_STATE_VERSION, op: "clear", at, owner, reason: data.reason }
-				: undefined;
+			return parseClear(data, at, owner);
 		default:
 			return undefined;
 	}
@@ -217,12 +257,15 @@ function autoCounter(id: string): number {
  * singleton and its stop deletes it, and `clear` empties both. Counters are high-water marks over every id
  * ever seen, so a clear never lowers them and a fresh auto id can never silently replace an armed one.
  *
- * Work a live process still owns is left out of the result and counted in `deferred`; `force` skips that
- * filter, which is only correct for a reload whose detach entry expired (the recorded pid is this process).
+ * Work a live process still owns is left out of the result and counted in `deferred`; `force` overrides
+ * that for the records it names, which is only correct for this process's own orphans — a reload whose
+ * detach entry expired, where nothing else is counting the work down.
  */
 export function replaySessionState(branch: readonly ReplayableEntry[], options: ReplayOptions = {}): ReplayResult {
 	const alive = options.alive ?? ownerAlive;
-	const force = options.force ?? false;
+	const force = options.force;
+	/** This process's own orphaned work is taken back; anyone else's is left alone. */
+	const takes = (owner: PersistOwner): boolean => force?.(owner) === true || !alive(owner);
 	const armed = new Map<string, RestoredTimer>();
 	let heartbeat: RestoredHeartbeat | undefined;
 	let timerCounter = 0;
@@ -255,8 +298,18 @@ export function replaySessionState(branch: readonly ReplayableEntry[], options: 
 				}
 				break;
 			case "clear":
-				armed.clear();
-				heartbeat = undefined;
+				if (record.timers === undefined) {
+					// A fork: the branch was copied from another file, so it starts empty.
+					armed.clear();
+					heartbeat = undefined;
+					break;
+				}
+				for (const id of record.timers) {
+					armed.delete(id);
+				}
+				if (record.heartbeat === true) {
+					heartbeat = undefined;
+				}
 				break;
 		}
 	}
@@ -264,13 +317,13 @@ export function replaySessionState(branch: readonly ReplayableEntry[], options: 
 	const timers: RestoredTimer[] = [];
 	let deferred = 0;
 	for (const timer of armed.values()) {
-		if (!force && alive(timer.owner)) {
+		if (!takes(timer.owner)) {
 			deferred++;
 			continue;
 		}
 		timers.push(timer);
 	}
-	if (heartbeat !== undefined && !force && alive(heartbeat.owner)) {
+	if (heartbeat !== undefined && !takes(heartbeat.owner)) {
 		deferred++;
 		heartbeat = undefined;
 	}

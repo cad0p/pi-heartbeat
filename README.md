@@ -111,13 +111,15 @@ Armed work is also written to the session, one custom entry per action, so a new
   - timer-31: 1 h 20 min late, due 2026-10-26 14:20: check deploy
   ```
 
-  A due date that is not today is written out in full, a gap of days reads as days, and there is no age bound: press Esc to stop the turn. The `fire` is written before the wake, so a crash during that turn does not fire it again.
-- a **heartbeat** resumes: one catch-up ping if a tick was missed, then its normal interval, and `tick` continues from where it stopped
+  A due date that is not today is written out in full, a gap of days reads as days, oldest first, and there is no age bound: press Esc to stop the turn. The `fire` is written before the wake, so a crash during that turn does not fire it again.
+- a **heartbeat** resumes: one catch-up ping if a tick was missed, then its normal interval from the last tick it recorded. The number continues (`#2` after `#1`); the tick count itself picks up where it left off after a `/reload`, and after a crash from the last tick the session recorded, since a tick is not written on every pass
 - ids continue (`timer-N+1`, next heartbeat number), so a new timer cannot replace a re-armed one
 
-A deliberate shutdown (`quit`, `new`, `resume`, `fork`) writes one `clear` for the whole session, so quitting and reopening fires nothing. A `/fork` inherits nothing either: it clears its own copy of the parent's log before replaying it, and the parent file keeps its timers.
+A deliberate shutdown (`quit`, `new`, `resume`) writes one `clear` naming the timers and the heartbeat that process was holding, and only those — so quitting and reopening fires nothing, while a second pi process on the same session file cannot cancel work the first one is still counting down. A `/fork` empties its own copy of the parent's log before replaying it, and the parent file keeps its timers.
 
-Delivery is at-least-once, never at-most-once. A `fire` or a `clear` cut off by a crash can repeat one wake, a torn `arm` is a timer that never existed, and a torn last line is repaired before the first record of the new process is written. Work whose recorded owner is still alive (another pi process, or the same pid before a restart) is never taken from it.
+Durability is at-least-once where a repeat is the safe failure and at-most-once where it is not. A `clear` cut off by a crash can re-arm one cancelled timer, a `fire` cut off the same way can repeat one wake, a torn `arm` is a timer that never existed, and a torn last line is repaired before the first record of the new process is written. In the other direction the `fire` is durable *before* its wake is delivered, so a crash inside that window loses the one wake instead of repeating it.
+
+Work whose recorded owner is still alive (another pi process, or the same pid before a restart) is never taken from it. The one exception is a `/reload` whose detach grace expired: the record names this very process and nothing else is counting the timer down, so the reload reclaims it — and only records that pass that test.
 
 Two cases where nothing re-arms, both deliberate: a second copy of the extension on the same session neither replays nor writes (the copy that owns the session key does), and a registry entry written by a newer version is replaced rather than read, so that activation keeps its timers in memory only. Two pi processes opening the same session file at the same instant are not reconciled: both replay and both arm, and the later `arm` for an id wins on disk.
 

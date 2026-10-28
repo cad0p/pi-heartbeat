@@ -15,6 +15,7 @@ import { registerProvider } from "./background-work.js";
 import { registerDisplayProvider } from "./display-provider.js";
 import { TimerManager } from "./timer-manager.js";
 import { replaySessionState, repairTornTail } from "./session-state.js";
+import { currentOwner, sameOwner } from "./process-identity.js";
 import { registerCancelCommand } from "./commands/cancel.js";
 import { registerSleepInterceptor } from "./guards/sleep-interceptor.js";
 import { registerPromptInjection } from "./guards/prompt-injection.js";
@@ -44,12 +45,13 @@ export default function activate(pi: ExtensionAPI): void {
 		// A fork copies the parent's log into its own file, and the parent's shutdown clear went to the
 		// parent file. This clear must precede the replay, or the fork's fold is not empty.
 		if (event.reason === "fork") {
-			manager.persistClear("fork");
+			manager.clearInherited();
 		}
 		const replayed = replaySessionState(ctx.sessionManager.getBranch(), {
 			// A reload whose detach entry expired: the recorded owner is this very process, which reads as
-			// alive, so only `force` can bring the work back.
-			force: mode === "fresh" && event.reason === "reload",
+			// alive, so only `force` can bring the work back — and only its own records, never a second
+			// process's live work on the same session file.
+			force: mode === "fresh" && event.reason === "reload" ? (owner) => sameOwner(owner, currentOwner()) : undefined,
 		});
 		if (mode === "fresh") {
 			manager.restore(replayed);
