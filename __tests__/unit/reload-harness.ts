@@ -36,14 +36,25 @@ export interface Activation {
 
 const SESSIONS = Symbol.for("pi-heartbeat.sessions");
 
+/** Every activation this harness created, so resetSessions() can shut them all down. */
+const ACTIVATIONS: Activation[] = [];
+
 export function sessionRegistry(): Map<string, RegistryEntry> {
 	const host = globalThis as unknown as Record<symbol, Map<string, RegistryEntry> | undefined>;
 	host[SESSIONS] ??= new Map();
 	return host[SESSIONS];
 }
 
-/** Dispose every armed session and empty the registry. Call in afterEach. */
+/**
+ * Shut down every activation this harness created and empty the registry. Call in afterEach.
+ *
+ * A standalone copy (a second activation on a key that is already live) is not in the registry: its entry is
+ * created inside TimerManager.bind()->attach() and never registered, so disposing the registry alone left its
+ * timers running into later tests. shutdown("quit") disposes that activation's entry — a shared, adopted entry
+ * included — which is why teardown runs after a test's assertions; only the registry slot is ownership-checked.
+ */
 export function resetSessions(): void {
+	for (const act of ACTIVATIONS.splice(0)) act.shutdown("quit");
 	const sessions = sessionRegistry();
 	for (const entry of sessions.values()) {
 		entry.dispose();
@@ -85,7 +96,7 @@ export function activation(key: string = randomUUID()): Activation {
 		return tool.execute(name, params);
 	};
 
-	return {
+	const act: Activation = {
 		key,
 		sendMessage,
 		start: (reason) => fire("session_start", reason),
@@ -105,6 +116,8 @@ export function activation(key: string = randomUUID()): Activation {
 			return tool.parameters;
 		},
 	};
+	ACTIVATIONS.push(act);
+	return act;
 }
 
 export function sentContents(act: Activation): string[] {

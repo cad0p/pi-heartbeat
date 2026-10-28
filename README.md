@@ -91,7 +91,7 @@ Use this when you need immediate control without waiting for the next trigger.
 
 ### Surviving `/reload`
 
-Armed timers and the heartbeat survive `/reload`: they keep their schedule, fire into the reloaded session, and ids continue (`timer-N+1`, next heartbeat number). Any other shutdown (quit, new, resume, fork) clears them as before.
+Armed timers and the heartbeat survive `/reload`: a timer keeps its original deadline, a fire that lands during the reload is delivered once by the reloaded session that adopts it (a detach the reload never adopts is retired after 5 minutes, as before), a heartbeat keeps at most one queued tick, and ids continue (`timer-N+1`, next heartbeat number). Any other shutdown (quit, new, resume, fork) clears them as before.
 
 The code being reloaded from decides this. The first `/reload` after updating from an older version still clears timers and the heartbeat; every later reload keeps them.
 
@@ -99,7 +99,7 @@ If the extension is loaded twice into the same session, the second copy keeps it
 
 ### Background work
 
-While timers are armed, the heartbeat runs, or a heartbeat tick or one-shot timer fires during a `/reload` gap and waits to be delivered, the session has background work. The extension registers itself as the `pi-heartbeat` provider of `@cad0p/pi-background-work`, so consumers such as `bg_wait` see it. Items are `timer:<id>`, `heartbeat:<n>`, `pending:<seq>` for a queued tick or timer, and `pending:legacy-<i>` for one queued before sequence numbers existed. The extension also registers a display provider, so the package's `bg-work` footer describes the work instead of counting it: one timer reads `timer-1 0:42`, several read `2 timers: timer-1 0:42, timer-2 1:05`, and a running heartbeat leads with the time to its next tick (`heartbeat 4:30 · 2 timers: …`). A queued wake folds into the timer or heartbeat that owes it; a wake that cannot be attributed reads `wake queued`. Timer ids must be 1-200 characters, with no edge whitespace and no control characters; the `timer` tool rejects other ids, and the provider skips any armed id the package would reject, so one bad id does not fail a listing.
+While timers are armed, the heartbeat runs, or a heartbeat tick or one-shot timer fires during a `/reload` gap and waits to be delivered, the session has background work. The extension registers itself as the `pi-heartbeat` provider of `@cad0p/pi-background-work`, so consumers such as `bg_wait` see it. Items are `timer:<id>`, `heartbeat:<n>`, `pending:<seq>` for a queued tick or timer, and `pending:legacy-<i>` for one queued before sequence numbers existed. The extension also registers a display provider, so the package's `bg-work` footer describes the work instead of counting it: one timer reads `timer-1 0:42`, several read `2 timers: timer-1 0:42, timer-2 1:05`, and a running heartbeat leads with the time to its next tick (`heartbeat 4:30 · 2 timers: …`). A queued wake folds into the timer or heartbeat that owes it; a wake that cannot be attributed reads `wake queued`. Timer ids must be 1-200 grapheme clusters and at most 250 UTF-16 units, with no edge whitespace and no control characters. The host compiles the tool schema with typebox 1.x, whose `maxLength` counts grapheme clusters, so 200 astral characters pass the schema at 400 UTF-16 units; the manager then refuses anything over 250 units, so `timer:<id>` fits the package's 256-unit id budget. The provider skips any armed id the package would still reject, so one bad id does not fail a listing.
 
 ## When to Use
 
