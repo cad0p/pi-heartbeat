@@ -360,6 +360,24 @@ describe("background work: display registration", () => {
 		);
 	});
 
+	it("(17) the package's own cap holds an over-long segment to 48 graphemes", () => {
+		const act = activation();
+		act.start("startup");
+		const items = [{ id: "x", sessionId: act.key }];
+		const oversized = { name: "oversized", describe: () => "y".repeat(80) };
+		const text = composeFooterText([{ name: "oversized", items }], [oversized], {
+			sessionId: act.key,
+			sessionIds: [act.key],
+			nowMs: Date.now(),
+		});
+		if (text === undefined) {
+			throw new Error("no text");
+		}
+		// The footer adds the glyph; the cap applies to the segment itself.
+		const segmentText = text.replace(/^⏳\s/, "");
+		expect([...segmenter.segment(segmentText)].length).toBeLessThanOrEqual(48);
+	});
+
 	it("(16) a malformed display registry does not stop session binding", async () => {
 		// An unsupported version makes registration throw, not only listing.
 		Reflect.set(globalThis, Symbol.for(BACKGROUND_WORK_DISPLAY_KEY), { version: 2, providers: new Map() });

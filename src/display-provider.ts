@@ -12,10 +12,8 @@ import {
 import { registry, type SessionEntry } from "./timer-manager.js";
 
 const PROVIDER_NAME = "pi-heartbeat";
-/** Longest segment, in graphemes, the footer keeps, the ellipsis included. */
+/** Longest segment, in graphemes, the footer keeps, the ellipsis included. Mirrors the package's own cap. */
 const MAX_SEGMENT = 48;
-/** A cut may not shorten a segment below this many graphemes. */
-const MIN_CUT = 32;
 const TIMER_PREFIX = "timer:";
 const HEARTBEAT_PREFIX = "heartbeat:";
 const PENDING_PREFIX = "pending:";
@@ -24,21 +22,6 @@ const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 function graphemesOf(text: string): string[] {
 	return [...segmenter.segment(text)].map((entry) => entry.segment);
-}
-
-/** Cap the segment as the footer does: cut at the last space or comma in range, add one ellipsis. */
-function capSegment(text: string): string {
-	const graphemes = graphemesOf(text);
-	if (graphemes.length <= MAX_SEGMENT) {
-		return text;
-	}
-	for (let index = MAX_SEGMENT - 1; index >= MIN_CUT; index--) {
-		const grapheme = graphemes[index];
-		if (grapheme === " " || grapheme === ",") {
-			return `${graphemes.slice(0, index).join("").trimEnd()}…`;
-		}
-	}
-	return `${graphemes.slice(0, MAX_SEGMENT - 1).join("")}…`;
 }
 
 /**
@@ -54,8 +37,8 @@ function timerPart(tokens: string[], used: number, budget: number): string {
 		// One timer whose id alone fills the segment: keep the clock, cut the name. Returning the
 		// whole token would push the wake out and leave a dangling separator once the cap cuts.
 		const cut = token.lastIndexOf(" ");
-		const clock = cut === -1 ? "" : token.slice(cut + 1);
-		const id = cut === -1 ? token : token.slice(0, cut);
+		const clock = token.slice(cut + 1);
+		const id = token.slice(0, cut);
 		const room = Math.max(1, budget - used - graphemesOf(clock).length - 2);
 		return `${graphemesOf(id).slice(0, room).join("").trimEnd()}… ${clock}`;
 	}
@@ -74,8 +57,11 @@ function timerPart(tokens: string[], used: number, budget: number): string {
 	return kept.length === tokens.length ? `${head}${kept.join(", ")}` : `${head}${kept.join(", ")}…`;
 }
 
-/** Time left until `deadlineMs` as `M:SS`; `0:00` once it has passed. */
+/** Time left until `deadlineMs` as `M:SS`; `0:00` once it has passed, and for a corrupt timestamp. */
 function remaining(deadlineMs: number, nowMs: number): string {
+	if (!Number.isFinite(deadlineMs)) {
+		return "0:00";
+	}
 	const seconds = Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
 	return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
@@ -204,7 +190,7 @@ export function describeArmedWork(items: readonly BackgroundWorkItem[], context:
 		if (wakeText !== undefined) {
 			parts.push(wakeText);
 		}
-		return parts.length === 0 ? null : capSegment(parts.join(" · "));
+		return parts.length === 0 ? null : parts.join(" · ");
 	} catch {
 		return null;
 	}
