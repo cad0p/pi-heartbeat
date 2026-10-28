@@ -76,6 +76,23 @@ describe("background work: the footer segment", () => {
 		expect(segment(act)).toBe("soon 0:00");
 	});
 
+	it("(4b) a corrupt timer createdAt reads 0:00, never NaN", async () => {
+		const act = activation();
+		act.start("startup");
+		await act.setTimer(42, "x", "build");
+		const entry = registry().get(act.key);
+		if (!entry) {
+			throw new Error("no entry");
+		}
+		const timer = entry.timers.get("build");
+		if (!timer) {
+			throw new Error("no timer");
+		}
+		timer.createdAt = "not a date";
+
+		expect(segment(act)).toBe("build 0:00");
+	});
+
 	it("(5) the heartbeat reads the time to its next tick", async () => {
 		const act = activation();
 		act.start("startup");
