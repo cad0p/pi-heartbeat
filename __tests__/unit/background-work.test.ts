@@ -123,6 +123,25 @@ describe("background work: what the provider reports", () => {
 		expect(listedWork(act.key)).toEqual(["timer:good"]);
 	});
 
+	it("(9c) the longest ids the manager accepts fit the package's 256-unit item budget", async () => {
+		const act = activation();
+		act.start("startup");
+		// 6 + 250 = 256 UTF-16 units: exactly the package's cap, so these must list, not be skipped.
+		await act.setTimer(60, "astral", "\u{1F680}".repeat(125));
+		await act.setTimer(60, "bmp", "b".repeat(200));
+		expect(listedWork(act.key).sort()).toEqual(["timer:" + "b".repeat(200), "timer:" + "\u{1F680}".repeat(125)]);
+	});
+
+	it("(9d) an astral id past the package's unit budget is refused before it is armed", async () => {
+		const act = activation();
+		act.start("startup");
+		// The schema's maxLength is enforced by whichever validator the host runs; JSON Schema semantics count
+		// code points, so 200 astral characters can pass a spec-compliant validator (400 UTF-16 units). The
+		// manager therefore enforces the unit budget itself, whatever layer let the id through.
+		await expect(act.setTimer(10, "x", "\u{1F680}".repeat(200))).rejects.toThrow(/at most 250 are allowed/);
+		expect(listedWork(act.key)).toEqual([]);
+	});
+
 	it("(9b) an id the schema would reject, held by the manager, is skipped and does not make the snapshot throw", async () => {
 		const act = activation();
 		act.start("startup");

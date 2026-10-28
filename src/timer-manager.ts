@@ -87,6 +87,13 @@ const DETACH_GRACE_MS = 5 * 60_000;
 /** Timer ids the `timer` tool accepts: 1-200 chars, no edge whitespace, no control characters. */
 export const TIMER_ID_MAX_LENGTH = 200;
 export const TIMER_ID_PATTERN = "^(?!\\s)(?![\\s\\S]*\\s$)[^\\x00-\\x1f\\x7f]+$";
+/**
+ * Longest id the background-work consumer can list: its v1 item ids are capped at 256 UTF-16 units, and the
+ * item is `timer:<id>`. The tool's `maxLength` counts code points, so it cannot enforce this: 200 astral
+ * characters are 400 units. An over-long id was accepted and armed, but the provider skipped it, so a record
+ * waiting only on that timer looked idle and could settle.
+ */
+export const MAX_LISTABLE_TIMER_ID_LENGTH = 256 - "timer:".length;
 
 export function registry(): Map<string, SessionEntry> {
 	const host = globalThis as unknown as { [SESSIONS]?: Map<string, SessionEntry> };
@@ -210,6 +217,11 @@ export class TimerManager {
 
 	// ── Session lifecycle ───────────────────────────────────────────
 
+	/**
+	 * Bind the manager to a session. Disposing the current entry first is safe only because pi emits
+	 * `session_start` once per activation (1.4.0 and 0.84.1): a second `session_start{reason:"reload"}`
+	 * on this manager would adopt the just-disposed entry and drop the armed timers.
+	 */
 	bind(key: string, reason: string): void {
 		this.session.dispose();
 		this.sessionKey = key;
@@ -234,6 +246,11 @@ export class TimerManager {
 
 	setTimer(seconds: number, message: string, id?: string): string {
 		const entry = this.session;
+		if (id !== undefined && id.length > MAX_LISTABLE_TIMER_ID_LENGTH) {
+			throw new Error(
+				`Timer id is ${id.length} UTF-16 units long; at most ${MAX_LISTABLE_TIMER_ID_LENGTH} are allowed, so the background-work item "timer:<id>" fits its 256-unit budget. The tool's 200-character limit counts code points, so an id of astral characters can pass it and still be refused here (each counts as two units).`,
+			);
+		}
 		const timerId = id ?? `timer-${++entry.timerCounter}`;
 
 		// Cancel existing timer with same ID

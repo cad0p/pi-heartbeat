@@ -9,24 +9,23 @@ import {
 	listBackgroundWorkProviders,
 	registerBackgroundWorkProvider,
 } from "@cad0p/pi-background-work";
-import { registry, type SessionEntry } from "./timer-manager.js";
+import { MAX_LISTABLE_TIMER_ID_LENGTH, registry, type SessionEntry } from "./timer-manager.js";
 
 const PROVIDER_NAME = "pi-heartbeat";
 /** The package rejects a provider listing more items than this. */
 const MAX_ITEMS = 10_000;
-/** The package rejects an item id longer than this. */
-const MAX_ITEM_ID_LENGTH = 256;
 
 /**
  * Mirrors validateString in @cad0p/pi-background-work for the item `timer:<id>`: non-empty, no NUL,
- * at most MAX_ITEM_ID_LENGTH. Edge whitespace is checked on the raw id, since the "timer:" prefix would
- * hide it from the package. Control characters are rejected as the timer tool's schema does.
+ * at most MAX_LISTABLE_TIMER_ID_LENGTH units (so the prefixed item fits the package's 256-unit budget).
+ * Edge whitespace is checked on the raw id, since the "timer:" prefix would hide it from the package.
+ * Control characters are rejected as the timer tool's schema does.
  */
 function isListableTimerId(id: string): boolean {
 	return (
 		id.length > 0 &&
 		id.trim() === id &&
-		`timer:${id}`.length <= MAX_ITEM_ID_LENGTH &&
+		id.length <= MAX_LISTABLE_TIMER_ID_LENGTH &&
 		![...id].some((char) => char.charCodeAt(0) < 0x20 || char === "\x7f")
 	);
 }

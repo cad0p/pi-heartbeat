@@ -74,6 +74,17 @@ describe("TimerManager", () => {
 			expect(manager.cancelTimer("nope")).toBe(false);
 		});
 
+		it("refuses an id whose timer:<id> the background-work consumer cannot list", () => {
+			expect(() => manager.setTimer(10, "x", "\u{1F680}".repeat(200))).toThrow(/at most 250 are allowed/);
+			expect(manager.getActiveTimerIds()).toEqual([]);
+		});
+
+		it("accepts the largest listable ids: 250 UTF-16 units, astral or not", () => {
+			manager.setTimer(10, "a", "\u{1F680}".repeat(125));
+			manager.setTimer(20, "b", "b".repeat(200));
+			expect(manager.getActiveTimerIds()).toEqual(["\u{1F680}".repeat(125), "b".repeat(200)]);
+		});
+
 		it("lists active timer IDs", () => {
 			manager.setTimer(10, "a", "t1");
 			manager.setTimer(20, "b", "t2");
