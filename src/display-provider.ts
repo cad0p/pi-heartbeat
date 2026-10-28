@@ -81,16 +81,12 @@ function heartbeatToken(entry: SessionEntry, nowMs: number): string {
 	return `heartbeat ${remaining(deadline, nowMs)}`;
 }
 
-/** The entry this session binds to, or `undefined` when the registry or every matching entry is unreadable. */
+/** The entry this session binds to, if any; a throw from the registry is the caller's to absorb. */
 function sessionEntry(context: DescribeContext): SessionEntry | undefined {
-	try {
-		for (const [key, entry] of registry()) {
-			if (entry.version === 1 && context.sessionIds.includes(key)) {
-				return entry;
-			}
+	for (const [key, entry] of registry()) {
+		if (entry.version === 1 && context.sessionIds.includes(key)) {
+			return entry;
 		}
-	} catch {
-		// Registry unreadable: contribute no segment.
 	}
 	return undefined;
 }

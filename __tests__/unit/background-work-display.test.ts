@@ -2,7 +2,7 @@ import { BACKGROUND_WORK_DISPLAY_KEY, listBackgroundWorkDisplayProviders, snapsh
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { describeArmedWork } from "../../src/display-provider.js";
 import { registry } from "../../src/timer-manager.js";
-import { type Activation, activation, resetBackgroundWork, resetSessions } from "./reload-harness.js";
+import { type Activation, activation, resetBackgroundWork, resetSessions, sentContents } from "./reload-harness.js";
 
 const SESSIONS = Symbol.for("pi-heartbeat.sessions");
 const PROVIDER = "pi-heartbeat";
@@ -137,6 +137,7 @@ describe("background work: the footer segment", () => {
 		}
 		entry.pending.push({
 			heartbeatId: 99,
+			seq: 1,
 			message: { customType: "x", content: "x", display: true, details: { type: "heartbeat", heartbeatId: 99 } },
 		});
 
@@ -221,20 +222,16 @@ describe("background work: display registration", () => {
 	});
 
 	it("(15) a malformed display registry does not stop session binding", async () => {
-		Reflect.set(globalThis, Symbol.for(BACKGROUND_WORK_DISPLAY_KEY), {
-			version: 1,
-			providers: new Map([["foreign", { name: "other" }]]),
-		});
+		// An unsupported version makes registration throw, not only listing.
+		Reflect.set(globalThis, Symbol.for(BACKGROUND_WORK_DISPLAY_KEY), { version: 2, providers: new Map() });
 		expect(() => listBackgroundWorkDisplayProviders()).toThrow();
 		const act = activation();
 
 		expect(() => act.start("startup")).not.toThrow();
 		expect(registry().has(act.key)).toBe(true);
-		// The public list throws in this state, so read the raw registry to see pi-heartbeat's registration.
-		const slot = Reflect.get(globalThis, Symbol.for(BACKGROUND_WORK_DISPLAY_KEY)) as { providers: Map<string, unknown> };
-		expect(slot.providers.has(PROVIDER)).toBe(true);
 
-		await act.setTimer(60, "x");
-		expect(segment(act)).toBe("timer-1 1:00");
+		await act.setTimer(10, "x");
+		vi.advanceTimersByTime(10_000);
+		expect(sentContents(act)).toEqual([expect.stringContaining("fired (after 10s): x")]);
 	});
 });
