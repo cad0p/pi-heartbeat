@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - Armed timers and heartbeat survive /reload (closes #8) ([#9](https://github.com/cad0p/pi-heartbeat/pull/9))
 - Report armed timers and the heartbeat as background work (closes #11) ([#12](https://github.com/cad0p/pi-heartbeat/pull/12))
 - Describe armed timers and the heartbeat in the background-work footer (closes #13) ([#14](https://github.com/cad0p/pi-heartbeat/pull/14))
+- *(timer)* Armed work survives a crash, and an overdue timer wakes once (closes #7) ([#18](https://github.com/cad0p/pi-heartbeat/pull/18))
 
 ### 🐛 Bug Fixes
 
