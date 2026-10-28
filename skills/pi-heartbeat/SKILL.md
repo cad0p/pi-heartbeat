@@ -58,6 +58,22 @@ heartbeat(action: "stop")
 - Min interval: 10 seconds
 - Tracks tick count for monitoring duration
 
+## Surviving a restart
+
+Timers and the heartbeat are written to the session, so a new pi process picks them up after a crash, a `kill -9` or a reboot:
+
+- a timer still due is re-armed for its remaining time, counted from when it was armed
+- a timer that came due while pi was not running wakes you once, saying how late it is:
+
+  ```text
+  ⏰ timer-27 fired 35 min late (due 14:05; pi was not running): check CI
+  ```
+
+  Several arrive in one message, one line each, oldest first. There is no age bound: the agent sees the timer is stale and decides. The user can press Esc to stop that turn.
+- the heartbeat resumes with one catch-up ping if a tick was missed, and its tick count continues
+
+Quitting pi (`quit`, `new`, `resume`, `fork`) clears them, so a deliberate quit fires nothing, and a `/fork` starts with no timers of its own.
+
 ## Commands
 
 | Command | Description |
