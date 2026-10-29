@@ -50,6 +50,7 @@
     "lint": "eslint src/ __tests__/",
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
+  "//typebox": "Pinned to the version @earendil-works/pi-coding-agent@0.84.1 resolves (via pi-ai), so the schema test compiles with the host's compiler. No range models that host: ^1.3.7 resolves 1.4.3 and ~1.3.7 resolves 1.3.37, and both count maxLength in code points instead of 1.3.7's grapheme clusters.",
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.0",
     "@eslint/js": "^9.27.0",
