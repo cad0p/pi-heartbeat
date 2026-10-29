@@ -119,12 +119,18 @@ describe("background work: what the provider reports", () => {
 		expect(accepts("a\u2028b")).toBe(true);
 		expect(accepts("a\u2028b ")).toBe(false);
 
-		// typebox 1.x's maxLength counts grapheme clusters: 200 astral characters are 400 UTF-16 units and
-		// still pass, 201 do not, and 251 units in 126 graphemes pass too. The manager's 250-unit refusal is
-		// therefore the layer that keeps "timer:<id>" inside the package's 256-unit budget.
+		// The pinned typebox 1.3.7 counts maxLength in grapheme clusters: 200 astral characters are 400 UTF-16
+		// units and still pass, 201 do not, and 251 units in 126 graphemes pass too. The manager's 250-unit
+		// refusal is therefore the layer that keeps "timer:<id>" inside the package's 256-unit budget.
 		expect(accepts("\u{1F680}".repeat(200))).toBe(true);
 		expect(accepts("\u{1F680}".repeat(201))).toBe(false);
 		expect(accepts("\u{1F680}".repeat(125) + "b")).toBe(true);
+
+		// 200 "e" + U+0301 pairs are 200 grapheme clusters but 400 code points, so this is the case that shows
+		// which measure the installed compiler applies. The astral cases above cannot: 200 astral characters
+		// are 200 clusters and 200 code points. 1.3.7 counts clusters and accepts this; a compiler that counts
+		// code points (typebox 1.3.37+) rejects it, which is why the manager's refusal names no measure.
+		expect(accepts("e\u0301".repeat(200))).toBe(true);
 
 		// The harness calls execute directly, bypassing the schema: the provider must still skip the bad id.
 		await act.setTimer(10, "x", " bad");

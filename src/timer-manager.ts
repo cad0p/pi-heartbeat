@@ -110,14 +110,15 @@ const SESSIONS = Symbol.for("pi-heartbeat.sessions");
 /** How long a detached entry waits for the reloaded activation before it is retired. */
 const DETACH_GRACE_MS = 5 * 60_000;
 
-/** Timer ids the `timer` tool accepts: 1-200 grapheme clusters, no edge whitespace, no control characters. */
+/** Timer ids the `timer` tool accepts: at most `TIMER_ID_MAX_LENGTH` in the schema library's measure, no edge whitespace, no control characters. */
 export const TIMER_ID_MAX_LENGTH = 200;
 export const TIMER_ID_PATTERN = "^(?!\\s)(?![\\s\\S]*\\s$)[^\\x00-\\x1f\\x7f]+$";
 /**
  * Longest id the background-work consumer can list: its v1 item ids are capped at 256 UTF-16 units, and the
- * item is `timer:<id>`. The tool's `maxLength` counts grapheme clusters (typebox 1.x, which the host compiles
- * the schema with), so it cannot enforce this: 200 astral characters are 400 units. An over-long id was accepted
- * and armed, but the provider skipped it, so a record waiting only on that timer looked idle and could settle.
+ * item is `timer:<id>`. The tool's `maxLength` is counted by the host's typebox in a measure of its own —
+ * grapheme clusters with the pinned 1.3.7, code points from 1.3.37 — so it cannot enforce this: 200 astral
+ * characters are 400 units either way. An over-long id was accepted and armed, but the provider skipped it, so a
+ * record waiting only on that timer looked idle and could settle.
  */
 export const MAX_LISTABLE_TIMER_ID_LENGTH = 256 - "timer:".length;
 
@@ -484,7 +485,7 @@ export class TimerManager {
 		const entry = this.session;
 		if (id !== undefined && id.length > MAX_LISTABLE_TIMER_ID_LENGTH) {
 			throw new Error(
-				`Timer id is ${id.length} UTF-16 units long; at most ${MAX_LISTABLE_TIMER_ID_LENGTH} are allowed, so the background-work item "timer:<id>" fits its 256-unit budget. The tool's 200-cluster limit counts grapheme clusters, so an id of astral characters can pass it and still be refused here.`,
+				`Timer id is ${id.length} UTF-16 units long; at most ${MAX_LISTABLE_TIMER_ID_LENGTH} are allowed, so the background-work item "timer:<id>" fits its 256-unit budget. The tool's ${TIMER_ID_MAX_LENGTH} limit is counted by the schema library that compiles it, which is not the same as UTF-16 units, so an id can pass it and still be refused here.`,
 			);
 		}
 		const timerId = id ?? `timer-${++entry.timerCounter}`;

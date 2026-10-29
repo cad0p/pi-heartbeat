@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { TimerManager } from "../../src/timer-manager.js";
+import { TIMER_ID_MAX_LENGTH, TimerManager } from "../../src/timer-manager.js";
 
 // Minimal mock of ExtensionAPI — just sendMessage
 function createMockPi() {
@@ -88,14 +88,18 @@ describe("TimerManager", () => {
 		});
 
 		it("refuses 251 units, one past the consumer's budget, even when the tool's limit admits the id", () => {
-			// 251 UTF-16 units but only 126 grapheme clusters: the schema's maxLength counts grapheme clusters,
-			// so the tool passes this id and the manager is the only layer that can keep the item inside 256 units.
+			// 251 UTF-16 units but only 126 grapheme clusters: the pinned schema's maxLength counts grapheme
+			// clusters, so the tool passes this id and the manager is the only layer that can keep the item
+			// inside 256 units.
 			const id = "\u{1F680}".repeat(125) + "b";
 			expect(id.length).toBe(251);
 
 			expect(() => manager.setTimer(10, "x", id)).toThrow("Timer id is 251 UTF-16 units long; at most 250 are allowed");
-			// Says what the tool's limit counts: grapheme clusters, not characters.
-			expect(() => manager.setTimer(10, "x", id)).toThrow("The tool's 200-cluster limit counts grapheme clusters");
+			// The tool's limit is the constant, and the sentence names no measure: it must stay true whether the
+			// schema library counts clusters (the pinned 1.3.7) or code points (1.3.37+).
+			expect(() => manager.setTimer(10, "x", id)).toThrow(
+				`The tool's ${TIMER_ID_MAX_LENGTH} limit is counted by the schema library that compiles it, which is not the same as UTF-16 units`,
+			);
 			expect(manager.getActiveTimerIds()).toEqual([]);
 		});
 
