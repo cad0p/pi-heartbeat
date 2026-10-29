@@ -94,6 +94,8 @@ describe("TimerManager", () => {
 			expect(id.length).toBe(251);
 
 			expect(() => manager.setTimer(10, "x", id)).toThrow("Timer id is 251 UTF-16 units long; at most 250 are allowed");
+			// Says what the tool's limit counts: grapheme clusters, not characters.
+			expect(() => manager.setTimer(10, "x", id)).toThrow("The tool's 200-cluster limit counts grapheme clusters");
 			expect(manager.getActiveTimerIds()).toEqual([]);
 		});
 
