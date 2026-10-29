@@ -19,5 +19,6 @@ All notable changes to this project will be documented in this file.
 ### 🐛 Bug Fixes
 
 - *(timer)* Refuse ids the consumer cannot list, and clear the #10 follow-ups (closes #10) ([#15](https://github.com/cad0p/pi-heartbeat/pull/15))
+- *(timer)* Say what the limit counts, and pin the dependency range (closes #16) ([#19](https://github.com/cad0p/pi-heartbeat/pull/19))
 
 
