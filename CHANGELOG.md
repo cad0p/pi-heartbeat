@@ -20,5 +20,6 @@ All notable changes to this project will be documented in this file.
 
 - *(timer)* Refuse ids the consumer cannot list, and clear the #10 follow-ups (closes #10) ([#15](https://github.com/cad0p/pi-heartbeat/pull/15))
 - *(timer)* Say what the limit counts, and pin the dependency range (closes #16) ([#19](https://github.com/cad0p/pi-heartbeat/pull/19))
+- *(timer)* Keep the limit message true under any typebox measure (closes #20) ([#21](https://github.com/cad0p/pi-heartbeat/pull/21))
 
 
