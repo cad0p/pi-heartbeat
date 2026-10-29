@@ -484,7 +484,7 @@ export class TimerManager {
 		const entry = this.session;
 		if (id !== undefined && id.length > MAX_LISTABLE_TIMER_ID_LENGTH) {
 			throw new Error(
-				`Timer id is ${id.length} UTF-16 units long; at most ${MAX_LISTABLE_TIMER_ID_LENGTH} are allowed, so the background-work item "timer:<id>" fits its 256-unit budget. The tool's 200-character limit counts grapheme clusters, so an id of astral characters can pass it and still be refused here.`,
+				`Timer id is ${id.length} UTF-16 units long; at most ${MAX_LISTABLE_TIMER_ID_LENGTH} are allowed, so the background-work item "timer:<id>" fits its 256-unit budget. The tool's 200-cluster limit counts grapheme clusters, so an id of astral characters can pass it and still be refused here.`,
 			);
 		}
 		const timerId = id ?? `timer-${++entry.timerCounter}`;
