@@ -186,15 +186,16 @@ function holdsOwner(value: unknown): value is { owner: PersistOwner } {
  * A process death: no `session_shutdown`, so the `clear` a quit would write is not in the log.
  *
  * Teardown still has to release the in-memory timers, so it runs `resetSessions()` and then drops the
- * records those shutdowns appended, leaving the log exactly as the killed process left it. Every record
- * is then re-owned by a dead process, so a restart has to recover from the log alone.
+ * records those shutdowns appended, leaving the log exactly as the killed process left it. The leaf is the
+ * last entry of the file, as pi sets it on load. Every record is then re-owned by a dead process, so a
+ * restart has to recover from the log alone.
  */
 export function crash(key: string): void {
-	const saved = new Map([...TREES].map(([name, session]) => [name, { length: session.entries.length, leaf: session.leaf }]));
+	const saved = new Map([...TREES].map(([name, session]) => [name, session.entries.length]));
 	resetSessions();
 	for (const [name, session] of TREES) {
-		session.entries.length = saved.get(name)?.length ?? 0;
-		session.leaf = saved.get(name)?.leaf ?? null;
+		session.entries.length = saved.get(name) ?? 0;
+		session.leaf = session.entries.at(-1)?.id ?? null;
 	}
 	for (const entry of journal(key)) {
 		if (holdsOwner(entry.data)) {

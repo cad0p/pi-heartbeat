@@ -43,8 +43,8 @@ function heartbeatStart(id: number, tick = 0, owner: PersistOwner = OWNER): Repl
 	});
 }
 
-function heartbeatStop(id: number): ReplayableEntry {
-	return entry({ v: 1, op: "heartbeat", at: AT, owner: OWNER, action: "stop", id });
+function heartbeatStop(id: number, owner: PersistOwner = OWNER): ReplayableEntry {
+	return entry({ v: 1, op: "heartbeat", at: AT, owner, action: "stop", id });
 }
 
 function cleared(reason = "user"): ReplayableEntry {
@@ -140,27 +140,27 @@ describe("session state: replay", () => {
 	it("(8) a live owner is deferred, and force overrides it only for the records it names", () => {
 		const live: PersistOwner = { pid: 777, boot: "boot-a", start: "100", uptime: 5 };
 		const alive = { alive: (owner: PersistOwner) => owner.pid === live.pid };
-		const branch = [arm("timer-1", 60, AT, live), heartbeatStart(2, 0, live)];
+		const entries = [arm("timer-1", 60, AT, live), heartbeatStart(2, 0, live)];
 
-		const deferred = replaySessionState(branch, alive);
+		const deferred = replaySessionState(entries, alive);
 		expect(deferred.timers).toEqual([]);
 		expect(deferred.heartbeat).toBeUndefined();
 		expect(deferred.deferred).toBe(2);
 		expect(deferred.invalid).toBe(0);
 
-		const mine = replaySessionState(branch, { ...alive, force: (owner) => owner.pid === live.pid });
+		const mine = replaySessionState(entries, { ...alive, force: (owner) => owner.pid === live.pid });
 		expect(mine.timers.map((timer) => timer.id)).toEqual(["timer-1"]);
 		expect(mine.heartbeat?.id).toBe(2);
 		expect(mine.deferred).toBe(0);
 
 		// A predicate naming another process leaves this one's work alone: a reload can only reclaim its own.
-		const theirs = replaySessionState(branch, { ...alive, force: (owner) => owner.pid !== live.pid });
+		const theirs = replaySessionState(entries, { ...alive, force: (owner) => owner.pid !== live.pid });
 		expect(theirs.timers).toEqual([]);
 		expect(theirs.heartbeat).toBeUndefined();
 		expect(theirs.deferred).toBe(2);
 	});
 
-	it("(9) a clear cancels the work it names, and one with no timers empties the branch", () => {
+	it("(9) a clear cancels the work it names, and one with no timers empties everything before it", () => {
 		const named = replaySessionState(
 			[
 				arm("timer-1"),
@@ -191,6 +191,19 @@ describe("session state: replay", () => {
 
 		expect(result.invalid).toBe(broken.length);
 		expect(result.timers.map((timer) => timer.id)).toEqual(["timer-1"]);
+	});
+
+	it("(11) a heartbeat stop only stops the heartbeat whose id it names", () => {
+		// Two processes on one file: P1 starts #1, P2 starts #2 on a sibling branch and crashes, P1 stops #1.
+		const p1: PersistOwner = { pid: 101, boot: "boot-a", start: "100", uptime: 5 };
+		const p2: PersistOwner = { pid: 202, boot: "boot-a", start: "200", uptime: 5 };
+		const result = replaySessionState([heartbeatStart(1, 0, p1), heartbeatStart(2, 0, p2), heartbeatStop(1, p1)], {
+			alive: (owner) => owner.pid === p1.pid,
+		});
+
+		expect(result.heartbeat).toMatchObject({ id: 2, owner: p2 });
+		expect(result.heartbeatIdCounter).toBe(2);
+		expect(result.deferred).toBe(0);
 	});
 });
 

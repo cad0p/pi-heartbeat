@@ -598,4 +598,33 @@ describe("restart survival: tree navigation (#25)", () => {
 		vi.advanceTimersByTime(1_000);
 		expect(sentContents(after)).toEqual([expect.stringContaining("Timer [t] fired (after 60s): abandoned")]);
 	});
+
+	it("(5) a heartbeat started on an abandoned branch resumes after a restart", async () => {
+		const before = activation();
+		before.start("startup");
+		const anchor = append(before.key, { type: "custom", customType: "conversation" });
+		await before.startHeartbeat(60, "abandoned");
+
+		rewind(before.key, anchor);
+		const after = restartAfter(before.key, 130_000);
+		expect(sentContents(after)).toEqual(["💓 Heartbeat #1 resumed after pi was not running (every 60s): abandoned"]);
+	});
+
+	it("(6) a /reload after the grace restores this process's timer from an abandoned branch", async () => {
+		const before = activation();
+		before.start("startup");
+		const anchor = append(before.key, { type: "custom", customType: "conversation" });
+		await before.setTimer(600, "far", "t");
+
+		rewind(before.key, anchor);
+		before.shutdown("reload");
+		vi.advanceTimersByTime(5 * 60_000);
+
+		const late = activation(before.key);
+		late.start("reload");
+		vi.advanceTimersByTime(299_999);
+		expect(sentContents(late)).toEqual([]);
+		vi.advanceTimersByTime(1);
+		expect(sentContents(late)).toEqual([expect.stringContaining("Timer [t] fired (after 600s): far")]);
+	});
 });

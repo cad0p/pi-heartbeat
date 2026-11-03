@@ -255,8 +255,9 @@ function autoCounter(id: string): number {
 
 /**
  * Fold the session's entries in file order, every branch: `arm` sets an id, `cancel`/`fire` delete it, a
- * heartbeat start replaces the singleton and its stop deletes it, and `clear` empties both. Counters are high-water marks over every id
- * ever seen, so a clear never lowers them and a fresh auto id can never silently replace an armed one.
+ * heartbeat start replaces the singleton, a stop deletes it only when it names that heartbeat's id, and
+ * `clear` empties both. Counters are high-water marks over every id ever seen, so a clear never lowers them
+ * and a fresh auto id can never silently replace an armed one.
  *
  * Work a live process still owns is left out of the result and counted in `deferred`; `force` overrides
  * that for the records it names, which is only correct for this process's own orphans — a reload whose
@@ -294,7 +295,9 @@ export function replaySessionState(entries: readonly ReplayableEntry[], options:
 				if (record.action === "start") {
 					heartbeatIdCounter = Math.max(heartbeatIdCounter, record.heartbeat.id);
 					heartbeat = { ...record.heartbeat, owner: record.owner };
-				} else {
+				} else if (heartbeat?.id === record.id) {
+					// A stop names the heartbeat it halted: one process stopping its own must not stop the one a
+					// second process on the same file started after it, on a sibling branch.
 					heartbeat = undefined;
 				}
 				break;
