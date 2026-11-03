@@ -41,7 +41,10 @@ export interface HeartbeatStateData {
 	lastTickAt?: string;
 }
 
-/** One action. The last record per id wins; a `clear` folds the whole set to empty. */
+/**
+ * One action. The last record per id wins; a `clear` deletes the timers it names (all of them when it names
+ * none) and, when flagged, the heartbeat only if its own owner started it.
+ */
 export type TimerStateRecord =
 	| { v: typeof HEARTBEAT_STATE_VERSION; op: "arm"; at: string; owner: PersistOwner; timer: TimerState }
 	| { v: typeof HEARTBEAT_STATE_VERSION; op: "cancel"; at: string; owner: PersistOwner; id: string }

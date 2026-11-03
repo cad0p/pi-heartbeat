@@ -548,6 +548,65 @@ describe("restart survival: replay and recovery", () => {
 		vi.advanceTimersByTime(120_000);
 		expect(sentContents(gone)).toEqual([]);
 	});
+
+	it("(25) a heartbeat adopted by a /reload ends when that process quits", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(60, "hb");
+		before.shutdown("reload");
+
+		const after = activation(before.key);
+		after.start("reload");
+		after.shutdown("quit");
+
+		const gone = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(120_000);
+		expect(sentContents(gone)).toEqual([]);
+	});
+
+	it("(26) a heartbeat resumed with a catch-up ping ends when that process quits at once", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(60, "hb");
+
+		// The resume must write a start under the new process, or its quit would not clear the dead one's.
+		const after = restartAfter(before.key, 130_000);
+		expect(sentContents(after)).toHaveLength(1);
+		after.shutdown("quit");
+
+		const gone = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(120_000);
+		expect(sentContents(gone)).toEqual([]);
+	});
+
+	it("(27) a heartbeat resumed with its boundary ahead ends when that process quits at once", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(60, "hb");
+
+		const after = restartAfter(before.key, 20_000);
+		expect(sentContents(after)).toEqual([]);
+		after.shutdown("quit");
+
+		const gone = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(120_000);
+		expect(sentContents(gone)).toEqual([]);
+	});
+
+	it("(28) a heartbeat carried across two restarts ends when the third process quits", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(60, "hb");
+		restartAfter(before.key, 20_000);
+
+		const third = restartAfter(before.key, 130_000);
+		third.shutdown("quit");
+		expect(stateOps(before.key).at(-1)).toBe("clear");
+
+		const gone = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(120_000);
+		expect(sentContents(gone)).toEqual([]);
+	});
 });
 
 describe("restart survival: tree navigation (#25)", () => {
