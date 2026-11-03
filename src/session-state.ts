@@ -11,7 +11,7 @@
 
 import { appendFileSync, closeSync, openSync, readSync, statSync } from "node:fs";
 import { isListableTimerId } from "./background-work.js";
-import { type PersistOwner, ownerAlive } from "./process-identity.js";
+import { type PersistOwner, ownerAlive, sameOwner } from "./process-identity.js";
 
 /** Custom entry type: never reaches the model, never participates in the context. */
 export const HEARTBEAT_STATE_ENTRY = "pi-heartbeat.state";
@@ -255,7 +255,7 @@ function autoCounter(id: string): number {
 
 /**
  * Fold the session's entries in file order, every branch: `arm` sets an id, `cancel`/`fire` delete it, a
- * heartbeat start replaces the singleton, a stop deletes it only when it names that heartbeat's id, and
+ * heartbeat start replaces the singleton, a stop deletes it only when its id and owner match it, and
  * `clear` empties both. Counters are high-water marks over every id ever seen, so a clear never lowers them
  * and a fresh auto id can never silently replace an armed one.
  *
@@ -295,9 +295,12 @@ export function replaySessionState(entries: readonly ReplayableEntry[], options:
 				if (record.action === "start") {
 					heartbeatIdCounter = Math.max(heartbeatIdCounter, record.heartbeat.id);
 					heartbeat = { ...record.heartbeat, owner: record.owner };
-				} else if (heartbeat?.id === record.id) {
+				} else if (heartbeat?.id === record.id && sameOwner(heartbeat.owner, record.owner)) {
 					// A stop names the heartbeat it halted: one process stopping its own must not stop the one a
-					// second process on the same file started after it, on a sibling branch.
+					// second process on the same file started after it, on a sibling branch. Ids alone collide:
+					// two processes that opened the file before either started one both count from the same
+					// number. Every holder writes a start under its own owner before it can stop (start, resume,
+					// reload claim), and `sameOwner` ignores the uptime snapshot.
 					heartbeat = undefined;
 				}
 				break;

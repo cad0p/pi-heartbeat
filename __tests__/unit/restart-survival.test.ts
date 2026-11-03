@@ -515,6 +515,23 @@ describe("restart survival: replay and recovery", () => {
 		await after.startHeartbeat(30, "again");
 		expect(stateRecords(before.key).at(-1)).toMatchObject({ op: "heartbeat", action: "start", heartbeat: { id: 2 } });
 	});
+
+	it("(23) a heartbeat adopted by a /reload and stopped after it stays stopped across a crash", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(60, "hb");
+		before.shutdown("reload");
+
+		const after = activation(before.key);
+		after.start("reload");
+		await after.stopHeartbeat();
+		// The reload claim re-writes the adopted heartbeat under its own id, so the stop names it.
+		expect(stateOps(before.key)).toEqual(["heartbeat:start", "heartbeat:start", "heartbeat:stop"]);
+
+		const gone = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(120_000);
+		expect(sentContents(gone)).toEqual([]);
+	});
 });
 
 describe("restart survival: tree navigation (#25)", () => {

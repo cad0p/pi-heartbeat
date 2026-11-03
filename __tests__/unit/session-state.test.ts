@@ -205,6 +205,34 @@ describe("session state: replay", () => {
 		expect(result.heartbeatIdCounter).toBe(2);
 		expect(result.deferred).toBe(0);
 	});
+
+	it("(12) a heartbeat stop only stops the heartbeat its owner started, when two processes share the id", () => {
+		// P1 and P2 opened the file before either started one, so both count from #1; P2 crashed.
+		const p1: PersistOwner = { pid: 101, boot: "boot-a", start: "100", uptime: 5 };
+		const p2: PersistOwner = { pid: 202, boot: "boot-a", start: "200", uptime: 5 };
+		const result = replaySessionState([heartbeatStart(1, 0, p1), heartbeatStart(1, 0, p2), heartbeatStop(1, p1)], {
+			alive: (owner) => owner.pid === p1.pid,
+		});
+
+		expect(result.heartbeat).toMatchObject({ id: 1, owner: p2 });
+		expect(result.deferred).toBe(0);
+	});
+
+	it("(13) a heartbeat resumed by a new owner and stopped by it stays stopped", () => {
+		const p1: PersistOwner = { pid: 101, boot: "boot-a", start: "100", uptime: 5 };
+		const p2: PersistOwner = { pid: 202, boot: "boot-a", start: "200", uptime: 5 };
+		const result = replaySessionState([heartbeatStart(1, 0, p1), heartbeatStart(1, 1, p2), heartbeatStop(1, p2)], DEAD);
+
+		expect(result.heartbeat).toBeUndefined();
+	});
+
+	it("(14) a stop whose owner uptime differs from its start still stops it: uptime is not identity", () => {
+		const started: PersistOwner = { pid: 101, boot: "boot-a", start: "100", uptime: 5 };
+		const stopped: PersistOwner = { ...started, uptime: 900 };
+		const result = replaySessionState([heartbeatStart(1, 0, started), heartbeatStop(1, stopped)], DEAD);
+
+		expect(result.heartbeat).toBeUndefined();
+	});
 });
 
 describe("session state: torn tail repair", () => {
