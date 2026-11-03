@@ -15,7 +15,7 @@ import { BACKGROUND_WORK_REGISTRY_KEY, snapshotBackgroundWork } from "@cad0p/pi-
 import type { TSchema } from "@sinclair/typebox";
 import { vi } from "vitest";
 import activate from "../../src/index.js";
-import { type PersistOwner, currentOwner } from "../../src/process-identity.js";
+import { type PersistOwner, currentOwner, sameOwner } from "../../src/process-identity.js";
 import { HEARTBEAT_STATE_ENTRY, type TimerStateRecord } from "../../src/session-state.js";
 
 export type SentMessage = { customType: string; content: string; details?: Record<string, unknown> };
@@ -178,6 +178,9 @@ export function setSessionFile(key: string, file: string): void {
 	SESSION_FILES.set(key, file);
 }
 
+/** Crashes so far: each one's dead owner is distinct from every earlier one's. */
+let crashes = 0;
+
 function holdsOwner(value: unknown): value is { owner: PersistOwner } {
 	return typeof value === "object" && value !== null && "owner" in value;
 }
@@ -187,8 +190,9 @@ function holdsOwner(value: unknown): value is { owner: PersistOwner } {
  *
  * Teardown still has to release the in-memory timers, so it runs `resetSessions()` and then drops the
  * records those shutdowns appended, leaving the log exactly as the killed process left it. The leaf is the
- * last entry of the file, as pi sets it on load. Every record is then re-owned by a dead process, so a
- * restart has to recover from the log alone.
+ * last entry of the file, as pi sets it on load. Every record this process wrote is then re-owned by a dead
+ * process of its own, one per crash, so a restart has to recover from the log alone and every process
+ * generation keeps a distinct owner, as a real restart's pid and start time do.
  */
 export function crash(key: string): void {
 	const saved = new Map([...TREES].map(([name, session]) => [name, session.entries.length]));
@@ -197,9 +201,12 @@ export function crash(key: string): void {
 		session.entries.length = saved.get(name) ?? 0;
 		session.leaf = session.entries.at(-1)?.id ?? null;
 	}
+	crashes++;
+	const dead: PersistOwner = { pid: DEAD_OWNER.pid - crashes, boot: `dead-${crashes}`, start: "0", uptime: 0 };
+	const self = currentOwner();
 	for (const entry of journal(key)) {
-		if (holdsOwner(entry.data)) {
-			entry.data.owner = DEAD_OWNER;
+		if (holdsOwner(entry.data) && sameOwner(entry.data.owner, self)) {
+			entry.data.owner = dead;
 		}
 	}
 }

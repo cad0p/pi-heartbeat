@@ -532,6 +532,22 @@ describe("restart survival: replay and recovery", () => {
 		vi.advanceTimersByTime(120_000);
 		expect(sentContents(gone)).toEqual([]);
 	});
+
+	it("(24) a heartbeat resumed with its boundary ahead and stopped after it stays stopped across a crash", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(60, "hb");
+
+		// The boundary is still ahead: the resume writes no ping, but it must still write a start under the
+		// new process, or its stop would not match the dead process's start.
+		const after = restartAfter(before.key, 20_000);
+		expect(sentContents(after)).toEqual([]);
+		await after.stopHeartbeat();
+
+		const gone = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(120_000);
+		expect(sentContents(gone)).toEqual([]);
+	});
 });
 
 describe("restart survival: tree navigation (#25)", () => {

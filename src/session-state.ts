@@ -5,8 +5,10 @@
  *
  * The log is append-only like the session itself, so it survives a crash between any two lines. One clock
  * per timer (`createdAt + seconds`, which the footer already uses) means a restart never extends a wait and
- * a tampered record has no second source to diverge from. Delivery is at-least-once, never at-most-once: a
- * torn `fire` is dropped while its `arm` survives, so the next start wakes once more.
+ * a tampered record has no second source to diverge from. Delivery is at-least-once where a repeat is the
+ * safe failure and at-most-once where it is not: a torn `fire` is dropped while its `arm` survives, so the
+ * next start wakes once more, but the `fire` is written before its wake, so a crash between the two loses
+ * that wake instead of repeating it.
  */
 
 import { appendFileSync, closeSync, openSync, readSync, statSync } from "node:fs";
@@ -69,7 +71,7 @@ export type TimerStateRecord =
 			reason: ClearReason;
 			/** The timers this clear cancels. Absent, it cancels every timer before it (a fork's copy). */
 			timers?: string[];
-			/** Whether it also stops the heartbeat. */
+			/** Whether it also stops the heartbeat, which it does only when its own owner started it. */
 			heartbeat?: boolean;
 	  };
 
@@ -255,9 +257,10 @@ function autoCounter(id: string): number {
 
 /**
  * Fold the session's entries in file order, every branch: `arm` sets an id, `cancel`/`fire` delete it, a
- * heartbeat start replaces the singleton, a stop deletes it only when its id and owner match it, and
- * `clear` empties both. Counters are high-water marks over every id ever seen, so a clear never lowers them
- * and a fresh auto id can never silently replace an armed one.
+ * heartbeat start replaces the singleton, a stop deletes it only when its id and owner match it, and a
+ * `clear` deletes the timers it names and, when flagged, the heartbeat only if its owner started it; a
+ * fork's `clear`, which names nothing, empties both. Counters are high-water marks over every id ever
+ * seen, so a clear never lowers them and a fresh auto id can never silently replace an armed one.
  *
  * Work a live process still owns is left out of the result and counted in `deferred`; `force` overrides
  * that for the records it names, which is only correct for this process's own orphans — a reload whose
@@ -314,7 +317,9 @@ export function replaySessionState(entries: readonly ReplayableEntry[], options:
 				for (const id of record.timers) {
 					armed.delete(id);
 				}
-				if (record.heartbeat === true) {
+				// Owner-scoped like a stop: a quit by the process whose heartbeat a second one replaced must not
+				// erase the second one's.
+				if (record.heartbeat === true && heartbeat !== undefined && sameOwner(heartbeat.owner, record.owner)) {
 					heartbeat = undefined;
 				}
 				break;
