@@ -11,14 +11,17 @@ import { HEARTBEAT_STATE_ENTRY } from "../../src/session-state.js";
 import {
 	type Activation,
 	activation,
+	append,
 	crash,
 	deadOwner,
-	journal,
+	forkBranch,
+	leaf,
 	listedWork,
 	liveOwner,
 	resetBackgroundWork,
 	resetSessions,
 	restart,
+	rewind,
 	sessionRegistry,
 	sentContents,
 	setSessionFile,
@@ -62,10 +65,11 @@ async function liveForeignOwner(): Promise<{ owner: PersistOwner; stop: () => vo
 
 /** Append a record to a key's log by hand, as a previous process would have left it. */
 function seed(key: string, data: unknown): void {
-	journal(key).push({ type: "custom", customType: HEARTBEAT_STATE_ENTRY, data });
+	append(key, { type: "custom", customType: HEARTBEAT_STATE_ENTRY, data });
 }
 
 const NOW = "2026-10-28T12:00:00.000Z";
+const DAY_MS = 24 * 60 * 60_000;
 
 describe("restart survival: replay and recovery", () => {
 	beforeEach(() => {
@@ -339,7 +343,7 @@ describe("restart survival: replay and recovery", () => {
 
 		// `/fork` copies every non-label entry of the branch into a new file, custom entries included.
 		const forkKey = randomUUID();
-		journal(forkKey).push(...structuredClone(journal(parent.key)));
+		forkBranch(parent.key, forkKey);
 		expect(stateOps(forkKey)).toEqual(["arm", "heartbeat:start"]);
 
 		const fork = activation(forkKey);
@@ -510,5 +514,209 @@ describe("restart survival: replay and recovery", () => {
 		const after = restart(before.key);
 		await after.startHeartbeat(30, "again");
 		expect(stateRecords(before.key).at(-1)).toMatchObject({ op: "heartbeat", action: "start", heartbeat: { id: 2 } });
+	});
+
+	it("(23) a heartbeat adopted by a /reload and stopped after it stays stopped across a crash", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(60, "hb");
+		before.shutdown("reload");
+
+		const after = activation(before.key);
+		after.start("reload");
+		await after.stopHeartbeat();
+		// The reload claim re-writes the adopted heartbeat under its own id, so the stop names it.
+		expect(stateOps(before.key)).toEqual(["heartbeat:start", "heartbeat:start", "heartbeat:stop"]);
+
+		const gone = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(120_000);
+		expect(sentContents(gone)).toEqual([]);
+	});
+
+	it("(24) a heartbeat resumed with its boundary ahead and stopped after it stays stopped across a crash", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(60, "hb");
+
+		// The boundary is still ahead: the resume writes no ping, but it must still write a start under the
+		// new process, or its stop would not match the dead process's start.
+		const after = restartAfter(before.key, 20_000);
+		expect(sentContents(after)).toEqual([]);
+		await after.stopHeartbeat();
+
+		const gone = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(120_000);
+		expect(sentContents(gone)).toEqual([]);
+	});
+
+	it("(25) a heartbeat adopted by a /reload ends when that process quits", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(60, "hb");
+		before.shutdown("reload");
+
+		const after = activation(before.key);
+		after.start("reload");
+		after.shutdown("quit");
+
+		const gone = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(120_000);
+		expect(sentContents(gone)).toEqual([]);
+	});
+
+	it("(26) a heartbeat resumed with a catch-up ping ends when that process quits at once", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(60, "hb");
+
+		// The resume must write a start under the new process, or its quit would not clear the dead one's.
+		const after = restartAfter(before.key, 130_000);
+		expect(sentContents(after)).toHaveLength(1);
+		after.shutdown("quit");
+
+		const gone = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(120_000);
+		expect(sentContents(gone)).toEqual([]);
+	});
+
+	it("(27) a heartbeat resumed with its boundary ahead ends when that process quits at once", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(60, "hb");
+
+		const after = restartAfter(before.key, 20_000);
+		expect(sentContents(after)).toEqual([]);
+		after.shutdown("quit");
+
+		const gone = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(120_000);
+		expect(sentContents(gone)).toEqual([]);
+	});
+
+	it("(28) a heartbeat carried across two restarts ends when the third process quits", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(60, "hb");
+		restartAfter(before.key, 20_000);
+
+		const third = restartAfter(before.key, 130_000);
+		third.shutdown("quit");
+		expect(stateOps(before.key).at(-1)).toBe("clear");
+
+		const gone = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(120_000);
+		expect(sentContents(gone)).toEqual([]);
+	});
+});
+
+describe("restart survival: tree navigation (#25)", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(NOW));
+		resetBackgroundWork();
+	});
+
+	afterEach(() => {
+		resetSessions();
+		vi.useRealTimers();
+	});
+
+	it("(1) a timer whose fire a rewind abandoned stays fired across restarts", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.setTimer(10, "x", "t");
+		const anchor = leaf(before.key);
+		vi.advanceTimersByTime(10_000);
+		expect(sentContents(before)).toEqual([expect.stringContaining("Timer [t] fired (after 10s): x")]);
+
+		// The rewind leaves the arm on the active path and moves the fire onto an abandoned branch.
+		rewind(before.key, anchor);
+		const after = restartAfter(before.key, DAY_MS);
+		vi.advanceTimersByTime(60_000);
+		expect(sentContents(after)).toEqual([]);
+
+		// The agent rewinds to the same anchor again, which would orphan anything the restart wrote.
+		rewind(before.key, anchor);
+		const again = restartAfter(before.key, DAY_MS);
+		vi.advanceTimersByTime(60_000);
+		expect(sentContents(again)).toEqual([]);
+		expect(stateOps(before.key)).toEqual(["arm", "fire"]);
+	});
+
+	it("(2) a heartbeat whose stop a rewind abandoned stays stopped across restarts", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(60, "hb");
+		const anchor = leaf(before.key);
+		await before.stopHeartbeat();
+
+		rewind(before.key, anchor);
+		const after = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(120_000);
+		expect(sentContents(after)).toEqual([]);
+
+		rewind(before.key, anchor);
+		const again = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(120_000);
+		expect(sentContents(again)).toEqual([]);
+		expect(stateOps(before.key)).toEqual(["heartbeat:start", "heartbeat:stop"]);
+	});
+
+	it("(3) a shutdown clear a rewind abandoned still cancels what it names", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.setTimer(600, "quit");
+		const anchor = leaf(before.key);
+		before.shutdown("quit");
+
+		rewind(before.key, anchor);
+		const after = restart(before.key);
+		vi.advanceTimersByTime(600_000);
+		expect(sentContents(after)).toEqual([]);
+		expect(stateOps(before.key)).toEqual(["arm", "clear"]);
+	});
+
+	it("(4) a timer still pending on an abandoned branch re-arms, as the live timer never stopped", async () => {
+		const before = activation();
+		before.start("startup");
+		// A conversation entry for the anchor to sit on, before the timer exists.
+		const anchor = append(before.key, { type: "custom", customType: "conversation" });
+		await before.setTimer(60, "abandoned", "t");
+
+		rewind(before.key, anchor);
+		const after = restartAfter(before.key, 20_000);
+		vi.advanceTimersByTime(39_000);
+		expect(sentContents(after)).toEqual([]);
+		vi.advanceTimersByTime(1_000);
+		expect(sentContents(after)).toEqual([expect.stringContaining("Timer [t] fired (after 60s): abandoned")]);
+	});
+
+	it("(5) a heartbeat started on an abandoned branch resumes after a restart", async () => {
+		const before = activation();
+		before.start("startup");
+		const anchor = append(before.key, { type: "custom", customType: "conversation" });
+		await before.startHeartbeat(60, "abandoned");
+
+		rewind(before.key, anchor);
+		const after = restartAfter(before.key, 130_000);
+		expect(sentContents(after)).toEqual(["💓 Heartbeat #1 resumed after pi was not running (every 60s): abandoned"]);
+	});
+
+	it("(6) a /reload after the grace restores this process's timer from an abandoned branch", async () => {
+		const before = activation();
+		before.start("startup");
+		const anchor = append(before.key, { type: "custom", customType: "conversation" });
+		await before.setTimer(600, "far", "t");
+
+		rewind(before.key, anchor);
+		before.shutdown("reload");
+		vi.advanceTimersByTime(5 * 60_000);
+
+		const late = activation(before.key);
+		late.start("reload");
+		vi.advanceTimersByTime(299_999);
+		expect(sentContents(late)).toEqual([]);
+		vi.advanceTimersByTime(1);
+		expect(sentContents(late)).toEqual([expect.stringContaining("Timer [t] fired (after 600s): far")]);
 	});
 });

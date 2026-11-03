@@ -3,9 +3,10 @@
  * pi instance). A reload is `shutdown("reload")` on the old activation followed
  * by `start("reload")` on a fresh one bound to the same session key.
  *
- * Each session key owns a journal: the custom entries this extension appends, in order, root->leaf.
- * It outlives an activation the way a session file does, so a restart reads what the previous process
- * wrote, and `crash()` can leave it with owners that are no longer alive.
+ * Each session key owns a journal: a session tree of the custom entries this extension appends, with ids,
+ * parent links and a leaf, plus the `branch_summary` a rewind leaves. It outlives an activation the way a
+ * session file does, so a restart reads what the previous process wrote, and `crash()` can leave it with
+ * owners that are no longer alive.
  */
 
 import { randomUUID } from "node:crypto";
@@ -14,12 +15,24 @@ import { BACKGROUND_WORK_REGISTRY_KEY, snapshotBackgroundWork } from "@cad0p/pi-
 import type { TSchema } from "@sinclair/typebox";
 import { vi } from "vitest";
 import activate from "../../src/index.js";
-import { type PersistOwner, currentOwner } from "../../src/process-identity.js";
+import { type PersistOwner, currentOwner, sameOwner } from "../../src/process-identity.js";
 import { HEARTBEAT_STATE_ENTRY, type TimerStateRecord } from "../../src/session-state.js";
 
 export type SentMessage = { customType: string; content: string; details?: Record<string, unknown> };
-/** One entry of a session's journal, shaped as pi's `CustomEntry` and returned by `getBranch()`. */
-export type JournalEntry = { type: "custom"; customType: string; data?: unknown };
+/** One entry of a session's journal, shaped as pi's `SessionEntry`: a `CustomEntry`, or a rewind's `branch_summary`. */
+export type JournalEntry = {
+	id: string;
+	parentId: string | null;
+	type: "custom" | "branch_summary";
+	customType?: string;
+	data?: unknown;
+};
+
+/** One session file: every entry in append order, and the leaf the next append hangs off. */
+interface SessionTree {
+	entries: JournalEntry[];
+	leaf: string | null;
+}
 
 type Handler = (event: { reason: string }, ctx: unknown) => unknown;
 type ToolDef = {
@@ -47,17 +60,71 @@ const SESSIONS = Symbol.for("pi-heartbeat.sessions");
 
 /** Every activation this harness created, so resetSessions() can shut them all down. */
 const ACTIVATIONS: Activation[] = [];
-/** One journal per session key, root->leaf, exactly what `getBranch()` hands the extension. */
-const JOURNALS = new Map<string, JournalEntry[]>();
+/** One session tree per key. */
+const TREES = new Map<string, SessionTree>();
 
-/** The custom entries appended to this key's session, in order. Never cleared: a session file is not either. */
-export function journal(key: string): JournalEntry[] {
-	let entries = JOURNALS.get(key);
-	if (entries === undefined) {
-		entries = [];
-		JOURNALS.set(key, entries);
+function tree(key: string): SessionTree {
+	let session = TREES.get(key);
+	if (session === undefined) {
+		session = { entries: [], leaf: null };
+		TREES.set(key, session);
 	}
-	return entries;
+	return session;
+}
+
+/**
+ * Every entry of this key's session, every branch, in file order: what `getEntries()` hands the extension.
+ * Never cleared: a session file is not either.
+ */
+export function journal(key: string): readonly JournalEntry[] {
+	return tree(key).entries;
+}
+
+/** Append one entry under the leaf and make it the leaf, as pi's `appendXXX()` does. Returns its id. */
+export function append(key: string, entry: Pick<JournalEntry, "type" | "customType" | "data">): string {
+	const session = tree(key);
+	const id = randomUUID();
+	session.entries.push({ ...entry, id, parentId: session.leaf });
+	session.leaf = id;
+	return id;
+}
+
+/** The current leaf: what an anchor records. */
+export function leaf(key: string): string {
+	const id = tree(key).leaf;
+	if (id === null) {
+		throw new Error(`session ${key} has no entries`);
+	}
+	return id;
+}
+
+/**
+ * A tree rewind (`/tree`, navigate_tree): a `branch_summary` parented at `anchor` becomes the leaf, as
+ * pi's `branchWithSummary()` does, and everything appended after the anchor is an abandoned branch.
+ */
+export function rewind(key: string, anchor: string): void {
+	tree(key).leaf = anchor;
+	append(key, { type: "branch_summary" });
+}
+
+/** Root->leaf through the parent links, as pi's `getBranch()` walks it. */
+function branch(key: string): JournalEntry[] {
+	const session = tree(key);
+	const byId = new Map(session.entries.map((entry) => [entry.id, entry]));
+	const path: JournalEntry[] = [];
+	for (let entry = byId.get(session.leaf ?? ""); entry !== undefined; entry = byId.get(entry.parentId ?? "")) {
+		path.unshift(entry);
+	}
+	return path;
+}
+
+/** `/fork`: the parent's active branch copied into a new session file, ids kept and re-chained, as `createBranchedSession()` does. */
+export function forkBranch(parentKey: string, forkKey: string): void {
+	const fork = tree(forkKey);
+	for (const entry of branch(parentKey)) {
+		fork.entries.push({ ...structuredClone(entry), parentId: fork.leaf });
+		fork.leaf = entry.id;
+	}
 }
 
 /** The `pi-heartbeat.state` records this key's log holds, in order. */
@@ -111,6 +178,9 @@ export function setSessionFile(key: string, file: string): void {
 	SESSION_FILES.set(key, file);
 }
 
+/** Crashes so far: each one's dead owner is distinct from every earlier one's. */
+let crashes = 0;
+
 function holdsOwner(value: unknown): value is { owner: PersistOwner } {
 	return typeof value === "object" && value !== null && "owner" in value;
 }
@@ -119,18 +189,24 @@ function holdsOwner(value: unknown): value is { owner: PersistOwner } {
  * A process death: no `session_shutdown`, so the `clear` a quit would write is not in the log.
  *
  * Teardown still has to release the in-memory timers, so it runs `resetSessions()` and then drops the
- * records those shutdowns appended, leaving the log exactly as the killed process left it. Every record
- * is then re-owned by a dead process, so a restart has to recover from the log alone.
+ * records those shutdowns appended, leaving the log exactly as the killed process left it. The leaf is the
+ * last entry of the file, as pi sets it on load. Every record this process wrote is then re-owned by a dead
+ * process of its own, one per crash, so a restart has to recover from the log alone and every process
+ * generation keeps a distinct owner, as a real restart's pid and start time do.
  */
 export function crash(key: string): void {
-	const lengths = new Map([...JOURNALS].map(([name, entries]) => [name, entries.length]));
+	const saved = new Map([...TREES].map(([name, session]) => [name, session.entries.length]));
 	resetSessions();
-	for (const [name, entries] of JOURNALS) {
-		entries.length = lengths.get(name) ?? 0;
+	for (const [name, session] of TREES) {
+		session.entries.length = saved.get(name) ?? 0;
+		session.leaf = session.entries.at(-1)?.id ?? null;
 	}
+	crashes++;
+	const dead: PersistOwner = { pid: DEAD_OWNER.pid - crashes, boot: `dead-${crashes}`, start: "0", uptime: 0 };
+	const self = currentOwner();
 	for (const entry of journal(key)) {
-		if (holdsOwner(entry.data)) {
-			entry.data.owner = DEAD_OWNER;
+		if (holdsOwner(entry.data) && sameOwner(entry.data.owner, self)) {
+			entry.data.owner = dead;
 		}
 	}
 }
@@ -154,7 +230,7 @@ export function activation(key: string = randomUUID()): Activation {
 	const commands = new Map<string, CommandDef>();
 	const sendMessage = vi.fn<(message: SentMessage, options?: unknown) => void>();
 	const appendEntry = vi.fn<(customType: string, data?: unknown) => void>((customType, data) => {
-		journal(key).push({ type: "custom", customType, data });
+		append(key, { type: "custom", customType, data });
 	});
 
 	const pi = {
@@ -176,8 +252,9 @@ export function activation(key: string = randomUUID()): Activation {
 		sessionManager: {
 			getSessionId: () => key,
 			getSessionFile: () => SESSION_FILES.get(key),
-			// Root->leaf, as pi returns it: an entry appended now is visible to the next call.
-			getBranch: () => [...journal(key)],
+			// File order and root->leaf, as pi returns them: an entry appended now is visible to the next call.
+			getEntries: () => [...journal(key)],
+			getBranch: () => branch(key),
 		},
 		ui: { notify: vi.fn() },
 	};

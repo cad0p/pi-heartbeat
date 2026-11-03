@@ -43,8 +43,8 @@ function heartbeatStart(id: number, tick = 0, owner: PersistOwner = OWNER): Repl
 	});
 }
 
-function heartbeatStop(id: number): ReplayableEntry {
-	return entry({ v: 1, op: "heartbeat", at: AT, owner: OWNER, action: "stop", id });
+function heartbeatStop(id: number, owner: PersistOwner = OWNER): ReplayableEntry {
+	return entry({ v: 1, op: "heartbeat", at: AT, owner, action: "stop", id });
 }
 
 function cleared(reason = "user"): ReplayableEntry {
@@ -140,27 +140,27 @@ describe("session state: replay", () => {
 	it("(8) a live owner is deferred, and force overrides it only for the records it names", () => {
 		const live: PersistOwner = { pid: 777, boot: "boot-a", start: "100", uptime: 5 };
 		const alive = { alive: (owner: PersistOwner) => owner.pid === live.pid };
-		const branch = [arm("timer-1", 60, AT, live), heartbeatStart(2, 0, live)];
+		const entries = [arm("timer-1", 60, AT, live), heartbeatStart(2, 0, live)];
 
-		const deferred = replaySessionState(branch, alive);
+		const deferred = replaySessionState(entries, alive);
 		expect(deferred.timers).toEqual([]);
 		expect(deferred.heartbeat).toBeUndefined();
 		expect(deferred.deferred).toBe(2);
 		expect(deferred.invalid).toBe(0);
 
-		const mine = replaySessionState(branch, { ...alive, force: (owner) => owner.pid === live.pid });
+		const mine = replaySessionState(entries, { ...alive, force: (owner) => owner.pid === live.pid });
 		expect(mine.timers.map((timer) => timer.id)).toEqual(["timer-1"]);
 		expect(mine.heartbeat?.id).toBe(2);
 		expect(mine.deferred).toBe(0);
 
 		// A predicate naming another process leaves this one's work alone: a reload can only reclaim its own.
-		const theirs = replaySessionState(branch, { ...alive, force: (owner) => owner.pid !== live.pid });
+		const theirs = replaySessionState(entries, { ...alive, force: (owner) => owner.pid !== live.pid });
 		expect(theirs.timers).toEqual([]);
 		expect(theirs.heartbeat).toBeUndefined();
 		expect(theirs.deferred).toBe(2);
 	});
 
-	it("(9) a clear cancels the work it names, and one with no timers empties the branch", () => {
+	it("(9) a clear cancels the work it names, and one with no timers empties everything before it", () => {
 		const named = replaySessionState(
 			[
 				arm("timer-1"),
@@ -191,6 +191,64 @@ describe("session state: replay", () => {
 
 		expect(result.invalid).toBe(broken.length);
 		expect(result.timers.map((timer) => timer.id)).toEqual(["timer-1"]);
+	});
+
+	it("(11) a heartbeat stop only stops the heartbeat whose id it names", () => {
+		// Two processes on one file: P1 starts #1, P2 starts #2 on a sibling branch and crashes, P1 stops #1.
+		const p1: PersistOwner = { pid: 101, boot: "boot-a", start: "100", uptime: 5 };
+		const p2: PersistOwner = { pid: 202, boot: "boot-a", start: "200", uptime: 5 };
+		const result = replaySessionState([heartbeatStart(1, 0, p1), heartbeatStart(2, 0, p2), heartbeatStop(1, p1)], {
+			alive: (owner) => owner.pid === p1.pid,
+		});
+
+		expect(result.heartbeat).toMatchObject({ id: 2, owner: p2 });
+		expect(result.heartbeatIdCounter).toBe(2);
+		expect(result.deferred).toBe(0);
+	});
+
+	it("(12) a heartbeat stop only stops the heartbeat its owner started, when two processes share the id", () => {
+		// P1 and P2 opened the file before either started one, so both count from #1; P2 crashed.
+		const p1: PersistOwner = { pid: 101, boot: "boot-a", start: "100", uptime: 5 };
+		const p2: PersistOwner = { pid: 202, boot: "boot-a", start: "200", uptime: 5 };
+		const result = replaySessionState([heartbeatStart(1, 0, p1), heartbeatStart(1, 0, p2), heartbeatStop(1, p1)], {
+			alive: (owner) => owner.pid === p1.pid,
+		});
+
+		expect(result.heartbeat).toMatchObject({ id: 1, owner: p2 });
+		expect(result.deferred).toBe(0);
+	});
+
+	it("(13) a heartbeat resumed by a new owner and stopped by it stays stopped", () => {
+		const p1: PersistOwner = { pid: 101, boot: "boot-a", start: "100", uptime: 5 };
+		const p2: PersistOwner = { pid: 202, boot: "boot-a", start: "200", uptime: 5 };
+		const result = replaySessionState([heartbeatStart(1, 0, p1), heartbeatStart(1, 1, p2), heartbeatStop(1, p2)], DEAD);
+
+		expect(result.heartbeat).toBeUndefined();
+	});
+
+	it("(14) a stop whose owner uptime differs from its start still stops it: uptime is not identity", () => {
+		const started: PersistOwner = { pid: 101, boot: "boot-a", start: "100", uptime: 5 };
+		const stopped: PersistOwner = { ...started, uptime: 900 };
+		const result = replaySessionState([heartbeatStart(1, 0, started), heartbeatStop(1, stopped)], DEAD);
+
+		expect(result.heartbeat).toBeUndefined();
+	});
+
+	it("(15) a stop for an earlier heartbeat of the same owner keeps its later one", () => {
+		const result = replaySessionState([heartbeatStart(2), heartbeatStop(1)], DEAD);
+
+		expect(result.heartbeat).toMatchObject({ id: 2, owner: OWNER });
+	});
+
+	it("(16) a quit only clears the heartbeat its owner started, not the one a second process replaced it with", () => {
+		// P2 starts #1, P1 (same counter) starts #1 after it and crashes, P2 quits holding its #1.
+		const p1: PersistOwner = { pid: 101, boot: "boot-a", start: "100", uptime: 5 };
+		const p2: PersistOwner = { pid: 202, boot: "boot-a", start: "200", uptime: 5 };
+		const quit = entry({ v: 1, op: "clear", at: AT, owner: p2, reason: "shutdown", timers: [], heartbeat: true });
+		const result = replaySessionState([heartbeatStart(1, 0, p2), heartbeatStart(1, 0, p1), quit], DEAD);
+
+		expect(result.heartbeat).toMatchObject({ id: 1, owner: p1 });
+		expect(result.deferred).toBe(0);
 	});
 });
 

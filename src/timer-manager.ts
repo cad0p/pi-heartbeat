@@ -399,7 +399,8 @@ export class TimerManager {
 
 	/**
 	 * session_start{fork}: `/fork` copies this branch's custom entries into a new file, so the fork empties
-	 * its own copy — a clear with no `timers` — before it replays. The parent file keeps its own.
+	 * its own copy — a clear with no `timers` — before it replays. The parent file already holds the
+	 * outgoing activation's shutdown clear: pi tears it down with session_shutdown{fork}, which runs `end()`.
 	 */
 	clearInherited(): void {
 		writeRecord(this.session, { v: HEARTBEAT_STATE_VERSION, op: "clear", at: new Date().toISOString(), owner: currentOwner(), reason: "fork" });

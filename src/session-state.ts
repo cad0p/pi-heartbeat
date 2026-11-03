@@ -1,16 +1,19 @@
 /**
- * The session's armed-work log: one custom entry per action, folded root->leaf when a new process opens
- * the session.
+ * The session's armed-work log: one custom entry per action, folded in file order across every branch when
+ * a new process opens the session. The actions are wall-clock events, not conversation state: a tree rewind
+ * cancels no live timer, so a record on an abandoned branch counts as much as one on the active path.
  *
  * The log is append-only like the session itself, so it survives a crash between any two lines. One clock
  * per timer (`createdAt + seconds`, which the footer already uses) means a restart never extends a wait and
- * a tampered record has no second source to diverge from. Delivery is at-least-once, never at-most-once: a
- * torn `fire` is dropped while its `arm` survives, so the next start wakes once more.
+ * a tampered record has no second source to diverge from. Delivery is at-least-once where a repeat is the
+ * safe failure and at-most-once where it is not: a torn `fire` is dropped while its `arm` survives, so the
+ * next start wakes once more, but the `fire` is written before its wake, so a crash between the two loses
+ * that wake instead of repeating it.
  */
 
 import { appendFileSync, closeSync, openSync, readSync, statSync } from "node:fs";
 import { isListableTimerId } from "./background-work.js";
-import { type PersistOwner, ownerAlive } from "./process-identity.js";
+import { type PersistOwner, ownerAlive, sameOwner } from "./process-identity.js";
 
 /** Custom entry type: never reaches the model, never participates in the context. */
 export const HEARTBEAT_STATE_ENTRY = "pi-heartbeat.state";
@@ -38,7 +41,10 @@ export interface HeartbeatStateData {
 	lastTickAt?: string;
 }
 
-/** One action. The last record per id wins; a `clear` folds the whole set to empty. */
+/**
+ * One action. The last record per id wins; a `clear` deletes the timers it names (all of them when it names
+ * none) and, when flagged, the heartbeat only if its own owner started it.
+ */
 export type TimerStateRecord =
 	| { v: typeof HEARTBEAT_STATE_VERSION; op: "arm"; at: string; owner: PersistOwner; timer: TimerState }
 	| { v: typeof HEARTBEAT_STATE_VERSION; op: "cancel"; at: string; owner: PersistOwner; id: string }
@@ -66,9 +72,9 @@ export type TimerStateRecord =
 			at: string;
 			owner: PersistOwner;
 			reason: ClearReason;
-			/** The timers this clear cancels. Absent, it cancels every timer in the branch (a fork's copy). */
+			/** The timers this clear cancels. Absent, it cancels every timer before it (a fork's copy). */
 			timers?: string[];
-			/** Whether it also stops the heartbeat. */
+			/** Whether it also stops the heartbeat, which it does only when its own owner started it. */
 			heartbeat?: boolean;
 	  };
 
@@ -166,8 +172,8 @@ function parseArm(data: Record<string, unknown>, at: string, owner: PersistOwner
 /**
  * A clear names what it cancels, because a shutdown can only cancel the work that activation was holding:
  * a second process on the same session file holds none of it and must not wipe the log of the process that
- * does. A clear without `timers` empties the branch instead, which is what a fork writes for the parent's
- * copied log.
+ * does. A clear without `timers` empties everything before it instead, which is what a fork writes for the
+ * parent's copied log.
  */
 function parseClear(data: Record<string, unknown>, at: string, owner: PersistOwner): TimerStateRecord | undefined {
 	const { reason, timers, heartbeat } = data;
@@ -253,15 +259,17 @@ function autoCounter(id: string): number {
 }
 
 /**
- * Fold the branch root->leaf: `arm` sets an id, `cancel`/`fire` delete it, a heartbeat start replaces the
- * singleton and its stop deletes it, and `clear` empties both. Counters are high-water marks over every id
- * ever seen, so a clear never lowers them and a fresh auto id can never silently replace an armed one.
+ * Fold the session's entries in file order, every branch: `arm` sets an id, `cancel`/`fire` delete it, a
+ * heartbeat start replaces the singleton, a stop deletes it only when its id and owner match it, and a
+ * `clear` deletes the timers it names and, when flagged, the heartbeat only if its owner started it; a
+ * fork's `clear`, which names nothing, empties both. Counters are high-water marks over every id ever
+ * seen, so a clear never lowers them and a fresh auto id can never silently replace an armed one.
  *
  * Work a live process still owns is left out of the result and counted in `deferred`; `force` overrides
  * that for the records it names, which is only correct for this process's own orphans — a reload whose
  * detach entry expired, where nothing else is counting the work down.
  */
-export function replaySessionState(branch: readonly ReplayableEntry[], options: ReplayOptions = {}): ReplayResult {
+export function replaySessionState(entries: readonly ReplayableEntry[], options: ReplayOptions = {}): ReplayResult {
 	const alive = options.alive ?? ownerAlive;
 	const force = options.force;
 	/** This process's own orphaned work is taken back; anyone else's is left alone. */
@@ -271,7 +279,7 @@ export function replaySessionState(branch: readonly ReplayableEntry[], options: 
 	let timerCounter = 0;
 	let heartbeatIdCounter = 0;
 	let invalid = 0;
-	for (const entry of branch) {
+	for (const entry of entries) {
 		if (entry.type !== "custom" || entry.customType !== HEARTBEAT_STATE_ENTRY) {
 			continue;
 		}
@@ -293,13 +301,18 @@ export function replaySessionState(branch: readonly ReplayableEntry[], options: 
 				if (record.action === "start") {
 					heartbeatIdCounter = Math.max(heartbeatIdCounter, record.heartbeat.id);
 					heartbeat = { ...record.heartbeat, owner: record.owner };
-				} else {
+				} else if (heartbeat?.id === record.id && sameOwner(heartbeat.owner, record.owner)) {
+					// A stop names the heartbeat it halted: one process stopping its own must not stop the one a
+					// second process on the same file started after it, on a sibling branch. Ids alone collide:
+					// two processes that opened the file before either started one both count from the same
+					// number. Every holder writes a start under its own owner before it can stop (start, resume,
+					// reload claim), and `sameOwner` ignores the uptime snapshot.
 					heartbeat = undefined;
 				}
 				break;
 			case "clear":
 				if (record.timers === undefined) {
-					// A fork: the branch was copied from another file, so it starts empty.
+					// A fork: the log before it was copied from another file, so it starts empty.
 					armed.clear();
 					heartbeat = undefined;
 					break;
@@ -307,7 +320,9 @@ export function replaySessionState(branch: readonly ReplayableEntry[], options: 
 				for (const id of record.timers) {
 					armed.delete(id);
 				}
-				if (record.heartbeat === true) {
+				// Owner-scoped like a stop: a quit by the process whose heartbeat a second one replaced must not
+				// erase the second one's.
+				if (record.heartbeat === true && heartbeat !== undefined && sameOwner(heartbeat.owner, record.owner)) {
 					heartbeat = undefined;
 				}
 				break;
