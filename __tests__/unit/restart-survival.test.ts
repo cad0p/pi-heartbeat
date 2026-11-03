@@ -11,14 +11,17 @@ import { HEARTBEAT_STATE_ENTRY } from "../../src/session-state.js";
 import {
 	type Activation,
 	activation,
+	append,
 	crash,
 	deadOwner,
-	journal,
+	forkBranch,
+	leaf,
 	listedWork,
 	liveOwner,
 	resetBackgroundWork,
 	resetSessions,
 	restart,
+	rewind,
 	sessionRegistry,
 	sentContents,
 	setSessionFile,
@@ -62,10 +65,11 @@ async function liveForeignOwner(): Promise<{ owner: PersistOwner; stop: () => vo
 
 /** Append a record to a key's log by hand, as a previous process would have left it. */
 function seed(key: string, data: unknown): void {
-	journal(key).push({ type: "custom", customType: HEARTBEAT_STATE_ENTRY, data });
+	append(key, { type: "custom", customType: HEARTBEAT_STATE_ENTRY, data });
 }
 
 const NOW = "2026-10-28T12:00:00.000Z";
+const DAY_MS = 24 * 60 * 60_000;
 
 describe("restart survival: replay and recovery", () => {
 	beforeEach(() => {
@@ -339,7 +343,7 @@ describe("restart survival: replay and recovery", () => {
 
 		// `/fork` copies every non-label entry of the branch into a new file, custom entries included.
 		const forkKey = randomUUID();
-		journal(forkKey).push(...structuredClone(journal(parent.key)));
+		forkBranch(parent.key, forkKey);
 		expect(stateOps(forkKey)).toEqual(["arm", "heartbeat:start"]);
 
 		const fork = activation(forkKey);
@@ -510,5 +514,88 @@ describe("restart survival: replay and recovery", () => {
 		const after = restart(before.key);
 		await after.startHeartbeat(30, "again");
 		expect(stateRecords(before.key).at(-1)).toMatchObject({ op: "heartbeat", action: "start", heartbeat: { id: 2 } });
+	});
+});
+
+describe("restart survival: tree navigation (#25)", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(NOW));
+		resetBackgroundWork();
+	});
+
+	afterEach(() => {
+		resetSessions();
+		vi.useRealTimers();
+	});
+
+	it("(1) a timer whose fire a rewind abandoned stays fired across restarts", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.setTimer(10, "x", "t");
+		const anchor = leaf(before.key);
+		vi.advanceTimersByTime(10_000);
+		expect(sentContents(before)).toEqual([expect.stringContaining("Timer [t] fired (after 10s): x")]);
+
+		// The rewind leaves the arm on the active path and moves the fire onto an abandoned branch.
+		rewind(before.key, anchor);
+		const after = restartAfter(before.key, DAY_MS);
+		vi.advanceTimersByTime(60_000);
+		expect(sentContents(after)).toEqual([]);
+
+		// The agent rewinds to the same anchor again, which would orphan anything the restart wrote.
+		rewind(before.key, anchor);
+		const again = restartAfter(before.key, DAY_MS);
+		vi.advanceTimersByTime(60_000);
+		expect(sentContents(again)).toEqual([]);
+		expect(stateOps(before.key)).toEqual(["arm", "fire"]);
+	});
+
+	it("(2) a heartbeat whose stop a rewind abandoned stays stopped across restarts", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(60, "hb");
+		const anchor = leaf(before.key);
+		await before.stopHeartbeat();
+
+		rewind(before.key, anchor);
+		const after = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(120_000);
+		expect(sentContents(after)).toEqual([]);
+
+		rewind(before.key, anchor);
+		const again = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(120_000);
+		expect(sentContents(again)).toEqual([]);
+		expect(stateOps(before.key)).toEqual(["heartbeat:start", "heartbeat:stop"]);
+	});
+
+	it("(3) a shutdown clear a rewind abandoned still cancels what it names", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.setTimer(600, "quit");
+		const anchor = leaf(before.key);
+		before.shutdown("quit");
+
+		rewind(before.key, anchor);
+		const after = restart(before.key);
+		vi.advanceTimersByTime(600_000);
+		expect(sentContents(after)).toEqual([]);
+		expect(stateOps(before.key)).toEqual(["arm", "clear"]);
+	});
+
+	it("(4) a timer still pending on an abandoned branch re-arms, as the live timer never stopped", async () => {
+		const before = activation();
+		before.start("startup");
+		// A conversation entry for the anchor to sit on, before the timer exists.
+		const anchor = append(before.key, { type: "custom", customType: "conversation" });
+		await before.setTimer(60, "abandoned", "t");
+
+		rewind(before.key, anchor);
+		const after = restartAfter(before.key, 20_000);
+		vi.advanceTimersByTime(39_000);
+		expect(sentContents(after)).toEqual([]);
+		vi.advanceTimersByTime(1_000);
+		expect(sentContents(after)).toEqual([expect.stringContaining("Timer [t] fired (after 60s): abandoned")]);
 	});
 });

@@ -117,6 +117,8 @@ Armed work is also written to the session, one custom entry per action, so a new
 
 A deliberate shutdown (`quit`, `new`, `resume`) writes one `clear` naming the timers and the heartbeat that process was holding, and only those — so quitting and reopening fires nothing, while a second pi process on the same session file cannot cancel work the first one is still counting down. A `/fork` empties its own copy of the parent's log before replaying it, and the parent file keeps its timers.
 
+The replay reads every branch of the session file in the order the actions were written, not only the branch you are on. Navigating the tree (`/tree`, a rewind to an earlier entry) never cancels a running timer, so it does not change what a restart restores either: a timer that fired or was cancelled stays that way even if its record is now on an abandoned branch, and a timer still pending there re-arms.
+
 Durability is at-least-once where a repeat is the safe failure and at-most-once where it is not. A `clear` cut off by a crash can re-arm one cancelled timer, a `fire` cut off the same way can repeat one wake, a torn `arm` is a timer that never existed, and a torn last line is repaired before the first record of the new process is written. In the other direction the `fire` is durable *before* its wake is delivered, so a crash inside that window loses the one wake instead of repeating it.
 
 Work whose recorded owner is still alive (another pi process, or the same pid before a restart) is never taken from it. The one exception is a `/reload` whose detach grace expired: the record names this very process and nothing else is counting the timer down, so the reload reclaims it — and only records that pass that test.

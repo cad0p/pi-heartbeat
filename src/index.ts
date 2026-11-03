@@ -47,7 +47,10 @@ export default function activate(pi: ExtensionAPI): void {
 		if (event.reason === "fork") {
 			manager.clearInherited();
 		}
-		const replayed = replaySessionState(ctx.sessionManager.getBranch(), {
+		// Every branch in file order, not the active path: timer actions are wall-clock events, and a tree
+		// rewind cancels no live timer, so a `fire`, `cancel` or `clear` it left on an abandoned branch
+		// still happened. Folding the path alone re-armed a fired timer on every restart (#25).
+		const replayed = replaySessionState(ctx.sessionManager.getEntries(), {
 			// A reload whose detach entry expired: the recorded owner is this very process, which reads as
 			// alive, so only `force` can bring the work back — and only its own records, never a second
 			// process's live work on the same session file.

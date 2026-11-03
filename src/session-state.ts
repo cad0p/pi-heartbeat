@@ -1,6 +1,7 @@
 /**
- * The session's armed-work log: one custom entry per action, folded root->leaf when a new process opens
- * the session.
+ * The session's armed-work log: one custom entry per action, folded in file order across every branch when
+ * a new process opens the session. The actions are wall-clock events, not conversation state: a tree rewind
+ * cancels no live timer, so a record on an abandoned branch counts as much as one on the active path.
  *
  * The log is append-only like the session itself, so it survives a crash between any two lines. One clock
  * per timer (`createdAt + seconds`, which the footer already uses) means a restart never extends a wait and
@@ -66,7 +67,7 @@ export type TimerStateRecord =
 			at: string;
 			owner: PersistOwner;
 			reason: ClearReason;
-			/** The timers this clear cancels. Absent, it cancels every timer in the branch (a fork's copy). */
+			/** The timers this clear cancels. Absent, it cancels every timer before it (a fork's copy). */
 			timers?: string[];
 			/** Whether it also stops the heartbeat. */
 			heartbeat?: boolean;
@@ -166,8 +167,8 @@ function parseArm(data: Record<string, unknown>, at: string, owner: PersistOwner
 /**
  * A clear names what it cancels, because a shutdown can only cancel the work that activation was holding:
  * a second process on the same session file holds none of it and must not wipe the log of the process that
- * does. A clear without `timers` empties the branch instead, which is what a fork writes for the parent's
- * copied log.
+ * does. A clear without `timers` empties everything before it instead, which is what a fork writes for the
+ * parent's copied log.
  */
 function parseClear(data: Record<string, unknown>, at: string, owner: PersistOwner): TimerStateRecord | undefined {
 	const { reason, timers, heartbeat } = data;
@@ -253,15 +254,15 @@ function autoCounter(id: string): number {
 }
 
 /**
- * Fold the branch root->leaf: `arm` sets an id, `cancel`/`fire` delete it, a heartbeat start replaces the
- * singleton and its stop deletes it, and `clear` empties both. Counters are high-water marks over every id
+ * Fold the session's entries in file order, every branch: `arm` sets an id, `cancel`/`fire` delete it, a
+ * heartbeat start replaces the singleton and its stop deletes it, and `clear` empties both. Counters are high-water marks over every id
  * ever seen, so a clear never lowers them and a fresh auto id can never silently replace an armed one.
  *
  * Work a live process still owns is left out of the result and counted in `deferred`; `force` overrides
  * that for the records it names, which is only correct for this process's own orphans — a reload whose
  * detach entry expired, where nothing else is counting the work down.
  */
-export function replaySessionState(branch: readonly ReplayableEntry[], options: ReplayOptions = {}): ReplayResult {
+export function replaySessionState(entries: readonly ReplayableEntry[], options: ReplayOptions = {}): ReplayResult {
 	const alive = options.alive ?? ownerAlive;
 	const force = options.force;
 	/** This process's own orphaned work is taken back; anyone else's is left alone. */
@@ -271,7 +272,7 @@ export function replaySessionState(branch: readonly ReplayableEntry[], options: 
 	let timerCounter = 0;
 	let heartbeatIdCounter = 0;
 	let invalid = 0;
-	for (const entry of branch) {
+	for (const entry of entries) {
 		if (entry.type !== "custom" || entry.customType !== HEARTBEAT_STATE_ENTRY) {
 			continue;
 		}
@@ -299,7 +300,7 @@ export function replaySessionState(branch: readonly ReplayableEntry[], options: 
 				break;
 			case "clear":
 				if (record.timers === undefined) {
-					// A fork: the branch was copied from another file, so it starts empty.
+					// A fork: the log before it was copied from another file, so it starts empty.
 					armed.clear();
 					heartbeat = undefined;
 					break;
