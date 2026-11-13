@@ -4,6 +4,7 @@ export default defineConfig({
 	test: {
 		environment: "node",
 		include: ["__tests__/integration/**/*.test.ts"],
+		setupFiles: ["__tests__/setup/empty-agent-dir.ts"],
 		testTimeout: 60_000, // sandbox install (npm pack + install) can be slow
 	},
 });

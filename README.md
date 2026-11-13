@@ -61,6 +61,7 @@ timer(seconds: 120, message: "Retry deploy check", id: "deploy-check-2")
 - wakes the agent once when the timer expires
 - supports multiple simultaneous timers
 - optional `id` for named cancellation
+- may not wait longer than `maxBackgroundWait` (default 30 minutes; see [Limits](#limits))
 
 ### `heartbeat`
 
@@ -75,6 +76,7 @@ heartbeat(action: "stop")
 - wakes the agent repeatedly with the provided message
 - only one heartbeat can be active at a time
 - starting a new heartbeat replaces the previous one
+- an interval may not be longer than `maxBackgroundWait` (see [Limits](#limits))
 
 ### `/cancel-timer`
 
@@ -167,12 +169,16 @@ Timer fires -> pi triggers a new agent turn
 
 ## Limits
 
+New timers and heartbeats are capped by `maxBackgroundWait`, which comes from `@cad0p/pi-background-work` and is set in `background-work.json` — the project's `.pi/` or the agent directory's (`~/.pi/agent/background-work.json` by default), in minutes. The default is **30**. The cap is the line between background work, which a session waits on, and scheduled work, which comes from outside, so a longer wait needs the setting raised. Whatever the setting, no wait is accepted beyond 2,147,483 s (~24.8 days): Node's timer limit, above which a delay fires after 1 ms instead.
+
+The policy is read on every call, so an edit applies without a restart. A file that is missing, unreadable or invalid falls back to the package's default, never to no limit. A wait equal to the cap is accepted; a longer one is refused with a tool error naming the limit and the setting. Work restored from a session's log is not re-checked, so a timer or heartbeat armed before the cap, or by an older version, still comes back.
+
 - `timer`
-  - range: **1–3600 seconds**
+  - range: **1 second – `maxBackgroundWait`** (1800 seconds by default), and never beyond 2,147,483 s (Node's timer limit), whatever the setting
   - supports multiple simultaneous timers
   - optional named `id` for cancellation
 - `heartbeat`
-  - interval: **10–3600 seconds**
+  - interval: **10 seconds – `maxBackgroundWait`**, and never beyond 2,147,483 s (Node's timer limit), whatever the setting
   - only one active heartbeat at a time
 
 ## Sleep Interceptor
@@ -182,6 +188,7 @@ This package also intercepts `sleep` in bash and blocks it only when `sleep` is 
 - `sleep 60` → **blocked** (only command)
 - `npm run build && sleep 60` → **blocked** (`sleep` is last)
 - `sleep 5 && npm start` → **allowed** (`sleep` is a startup delay before real work)
+- `sleep 3600` → **blocked** with the default 30-minute cap, and the message says the wait is over `maxBackgroundWait`, so `timer` would refuse it too
 
 Disable interception with:
 

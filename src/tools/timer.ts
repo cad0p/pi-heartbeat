@@ -5,6 +5,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { TIMER_ID_MAX_LENGTH, TIMER_ID_PATTERN, type TimerManager } from "../timer-manager.js";
+import { waitRefusal } from "../wait-limit.js";
 
 export function registerTimerTool(pi: ExtensionAPI, manager: TimerManager): void {
 	pi.registerTool({
@@ -15,12 +16,14 @@ export function registerTimerTool(pi: ExtensionAPI, manager: TimerManager): void
 			"When the timer fires, you get woken up with the message. " +
 			"Use this instead of `sleep` when you need to wait for something " +
 			"(build completion, deployment, polling intervals, etc.). " +
-			"You can set multiple timers simultaneously.",
+			"You can set multiple timers simultaneously. " +
+			"A timer may not wait longer than `maxBackgroundWait` (background-work.json, default 30 minutes).",
 		parameters: Type.Object({
 			seconds: Type.Number({
-				description: "Delay in seconds before waking up",
+				description:
+					"Delay in seconds before waking up. At most `maxBackgroundWait` from background-work.json " +
+					"(default 30 minutes)",
 				minimum: 1,
-				maximum: 3600,
 			}),
 			message: Type.String({
 				description:
@@ -36,7 +39,11 @@ export function registerTimerTool(pi: ExtensionAPI, manager: TimerManager): void
 			),
 		}),
 
-		async execute(_toolCallId, params) {
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const refusal = waitRefusal("timer", params.seconds, ctx.cwd);
+			if (refusal !== undefined) {
+				throw new Error(refusal);
+			}
 			const timerId = manager.setTimer(params.seconds, params.message, params.id);
 
 			return {

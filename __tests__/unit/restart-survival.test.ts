@@ -283,7 +283,7 @@ describe("restart survival: replay and recovery", () => {
 	it("(11) auto ids continue the restored counter", async () => {
 		const before = activation();
 		before.start("startup");
-		await before.setTimer(3600, "seven", "timer-7");
+		await before.setTimer(1800, "seven", "timer-7");
 
 		const after = restart(before.key);
 		await after.setTimer(60, "next");

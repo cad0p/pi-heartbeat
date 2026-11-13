@@ -5,6 +5,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import type { TimerManager } from "../timer-manager.js";
+import { waitRefusal } from "../wait-limit.js";
 
 export function registerHeartbeatTool(pi: ExtensionAPI, manager: TimerManager): void {
 	pi.registerTool({
@@ -15,14 +16,16 @@ export function registerHeartbeatTool(pi: ExtensionAPI, manager: TimerManager): 
 			"with a status check message. Use for long-running monitoring " +
 			"(deployment progress, CI pipeline, server health, process supervision). " +
 			"Only one heartbeat can be active at a time. Starting a new one stops the previous. " +
-			"Stop the heartbeat when the work you are monitoring is done; while it runs, your session counts as having pending background work.",
+			"Stop the heartbeat when the work you are monitoring is done; while it runs, your session counts as having pending background work. " +
+			"An interval may not be longer than `maxBackgroundWait` (background-work.json, default 30 minutes).",
 		parameters: Type.Object({
 			action: Type.Union([Type.Literal("start"), Type.Literal("stop"), Type.Literal("status")]),
 			interval_seconds: Type.Optional(
 				Type.Number({
-					description: "Interval between heartbeats in seconds (default: 60, min: 10)",
+					description:
+						"Interval between heartbeats in seconds (default: 60, min: 10). At most `maxBackgroundWait` " +
+						"from background-work.json (default 30 minutes)",
 					minimum: 10,
-					maximum: 3600,
 				}),
 			),
 			message: Type.Optional(
@@ -33,7 +36,7 @@ export function registerHeartbeatTool(pi: ExtensionAPI, manager: TimerManager): 
 			),
 		}),
 
-		async execute(_toolCallId, params): Promise<{ content: { type: "text"; text: string }[]; details: Record<string, any> }> {
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			if (params.action === "status") {
 				const state = manager.getHeartbeatState();
 				if (state) {
@@ -80,6 +83,10 @@ export function registerHeartbeatTool(pi: ExtensionAPI, manager: TimerManager): 
 
 		// action === "start"
 			const intervalSec = params.interval_seconds ?? 60;
+			const refusal = waitRefusal("heartbeat", intervalSec, ctx.cwd);
+			if (refusal !== undefined) {
+				throw new Error(refusal);
+			}
 			const msg = params.message ?? "Periodic status check";
 			const state = manager.startHeartbeat(intervalSec, msg);
 
