@@ -24,5 +24,6 @@ All notable changes to this project will be documented in this file.
 - *(package)* Ship CHANGELOG.md so Pi shows Extension Updates (closes #22)
 - *(recovery)* Replay every branch, so a rewound-away fire stays fired (closes #25) ([#26](https://github.com/cad0p/pi-heartbeat/pull/26))
 - *(lifecycle)* A quit keeps the heartbeat and timers, so a restart resumes them (closes #28) ([#30](https://github.com/cad0p/pi-heartbeat/pull/30))
+- *(tools)* Refuse timers and heartbeats longer than maxBackgroundWait (closes #29) ([#31](https://github.com/cad0p/pi-heartbeat/pull/31))
 
 
