@@ -188,7 +188,7 @@ This package also intercepts `sleep` in bash and blocks it only when `sleep` is 
 - `sleep 60` → **blocked** (only command)
 - `npm run build && sleep 60` → **blocked** (`sleep` is last)
 - `sleep 5 && npm start` → **allowed** (`sleep` is a startup delay before real work)
-- `sleep 3600` → **blocked**, and the message says the wait is over `maxBackgroundWait`, so `timer` would refuse it too
+- `sleep 3600` → **blocked** with the default 30-minute cap, and the message says the wait is over `maxBackgroundWait`, so `timer` would refuse it too
 
 Disable interception with:
 

@@ -34,12 +34,9 @@ describe("wait limit: maxBackgroundWait", () => {
 	beforeEach(() => {
 		resetBackgroundWork();
 		vi.stubEnv("PI_SLEEP_INTERCEPTOR", "1");
-		// A policy in the developer's own agent directory must not decide what these tests see.
 		root = mkdtempSync(join(tmpdir(), "pi-heartbeat-wait-limit-"));
 		cwd = join(root, "project");
 		mkdirSync(cwd);
-		mkdirSync(join(root, "agent"));
-		vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
 	});
 
 	afterEach(() => {
@@ -162,5 +159,26 @@ describe("wait limit: maxBackgroundWait", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it("(8) a wait past Node's own timer limit is refused even when the policy allows it", async () => {
+		const act = activation(undefined, { cwd });
+		act.start("startup");
+		mkdirSync(join(cwd, ".pi"));
+		writeFileSync(join(cwd, ".pi", "background-work.json"), JSON.stringify({ maxBackgroundWait: 40000 }));
+
+		// Node clamps a delay of 2 ** 31 ms or more to 1 ms, so these would fire at once instead of waiting.
+		const overTimer = await refusal(act.setTimer(2_147_484, "past Node"));
+		const overHeartbeat = await refusal(act.startHeartbeat(2_147_484, "past Node"));
+		for (const message of [overTimer, overHeartbeat]) {
+			expect(message).toMatch(/2147483s/);
+			expect(message).toMatch(/Node's timer limit is what binds/);
+			expect(message).not.toContain("raise the setting to wait longer");
+		}
+		expect(listedWork(act.key)).toEqual([]);
+
+		expect(await refusal(act.setTimer(2_147_483, "at Node's limit"))).toBeNull();
+		expect(await refusal(act.startHeartbeat(2_147_483, "at Node's limit"))).toBeNull();
+		expect(listedWork(act.key)).toEqual(["timer:timer-1", "heartbeat:1"]);
 	});
 });
