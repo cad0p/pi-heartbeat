@@ -23,5 +23,6 @@ All notable changes to this project will be documented in this file.
 - *(timer)* Keep the limit message true under any typebox measure (closes #20) ([#21](https://github.com/cad0p/pi-heartbeat/pull/21))
 - *(package)* Ship CHANGELOG.md so Pi shows Extension Updates (closes #22)
 - *(recovery)* Replay every branch, so a rewound-away fire stays fired (closes #25) ([#26](https://github.com/cad0p/pi-heartbeat/pull/26))
+- *(lifecycle)* A quit keeps the heartbeat and timers, so a restart resumes them (closes #28) ([#30](https://github.com/cad0p/pi-heartbeat/pull/30))
 
 
