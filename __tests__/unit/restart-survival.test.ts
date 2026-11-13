@@ -151,8 +151,8 @@ describe("restart survival: replay and recovery", () => {
 		expect(stateOps(key)).toEqual(["arm"]);
 	});
 
-	it("(5) quit, new and resume write a clear, and a restart revives nothing", async () => {
-		for (const reason of ["quit", "new", "resume"]) {
+	it("(5) new, resume and fork write a clear, and a restart revives nothing", async () => {
+		for (const reason of ["new", "resume", "fork"]) {
 			const act = activation();
 			act.start("startup");
 			await act.setTimer(10, reason);
@@ -221,7 +221,7 @@ describe("restart survival: replay and recovery", () => {
 		expect(sentContents(betaAfter)).toEqual([]);
 	});
 
-	it("(8) the heartbeat resumes with one catch-up ping, stop persists, and a quit revives nothing", async () => {
+	it("(8) the heartbeat resumes with one catch-up ping, and an explicit stop outlives the quit after it", async () => {
 		const before = activation();
 		before.start("startup");
 		await before.startHeartbeat(60, "hb");
@@ -241,6 +241,8 @@ describe("restart survival: replay and recovery", () => {
 		expect(stateOps(before.key).at(-1)).toBe("heartbeat:stop");
 
 		after.shutdown("quit");
+		// A quit writes nothing, so the stop is still the last word in the log.
+		expect(stateOps(before.key).at(-1)).toBe("heartbeat:stop");
 		const gone = restart(before.key);
 		vi.advanceTimersByTime(120_000);
 		expect(sentContents(gone)).toEqual([]);
@@ -355,7 +357,7 @@ describe("restart survival: replay and recovery", () => {
 		expect(sentContents(fork)).toEqual([]);
 	});
 
-	it("(16) a clear cancels only the work that activation held, so a second process's quit keeps the log", async () => {
+	it("(16) a second process's quit neither cancels nor revives the owner's live work", async () => {
 		const key = randomUUID();
 		seed(key, {
 			v: 1,
@@ -371,16 +373,22 @@ describe("restart survival: replay and recovery", () => {
 		second.start("startup");
 		expect(stateOps(key)).toEqual(["arm"]);
 
+		// Its quit writes no clear at all: the work is not its to cancel, and the owner still holds it.
 		second.shutdown("quit");
-		expect(stateOps(key)).toEqual(["arm", "clear"]);
-		expect(stateRecords(key).at(-1)).toMatchObject({ op: "clear", reason: "shutdown", timers: [], heartbeat: false });
+		expect(stateOps(key)).toEqual(["arm"]);
 
-		// The owner then dies for real, and the next process still finds the timer it left behind.
-		crash(key);
+		// A reopen while the owner is alive re-arms nothing, and wakes nothing: the record's owner answers.
+		vi.advanceTimersByTime(60_000);
 		const third = activation(key);
 		third.start("startup");
-		vi.advanceTimersByTime(600_000);
-		expect(sentContents(third)).toEqual([expect.stringContaining("fired (after 600s): live")]);
+		expect(stateOps(key)).toEqual(["arm"]);
+		vi.advanceTimersByTime(60_000);
+		expect(sentContents(third)).toEqual([]);
+
+		// Only when the owner dies for real does the next process restore the timer it left behind.
+		const fourth = restartAfter(key, 60_000);
+		vi.advanceTimersByTime(480_000);
+		expect(sentContents(fourth)).toEqual([expect.stringContaining("fired (after 600s): live")]);
 	});
 
 	it("(17) force does not take work from another live process", async () => {
@@ -549,7 +557,7 @@ describe("restart survival: replay and recovery", () => {
 		expect(sentContents(gone)).toEqual([]);
 	});
 
-	it("(25) a heartbeat adopted by a /reload ends when that process quits", async () => {
+	it("(25) a heartbeat adopted by a /reload resumes when that process quits", async () => {
 		const before = activation();
 		before.start("startup");
 		await before.startHeartbeat(60, "hb");
@@ -558,28 +566,32 @@ describe("restart survival: replay and recovery", () => {
 		const after = activation(before.key);
 		after.start("reload");
 		after.shutdown("quit");
+		// The adoption wrote the start this quit leaves behind; the quit itself wrote nothing.
+		expect(stateOps(before.key).at(-1)).toBe("heartbeat:start");
 
 		const gone = restartAfter(before.key, 130_000);
-		vi.advanceTimersByTime(120_000);
-		expect(sentContents(gone)).toEqual([]);
+		expect(sentContents(gone)).toEqual([expect.stringContaining("💓 Heartbeat #1 resumed after pi was not running (every 60s): hb")]);
+		vi.advanceTimersByTime(60_000);
+		expect(sentContents(gone).at(-1)).toContain("Heartbeat #1 tick");
 	});
 
-	it("(26) a heartbeat resumed with a catch-up ping ends when that process quits at once", async () => {
+	it("(26) a heartbeat resumed with a catch-up ping resumes again after that process quits at once", async () => {
 		const before = activation();
 		before.start("startup");
 		await before.startHeartbeat(60, "hb");
 
-		// The resume must write a start under the new process, or its quit would not clear the dead one's.
+		// The resume writes a start under the new process, which is what the next one replays.
 		const after = restartAfter(before.key, 130_000);
 		expect(sentContents(after)).toHaveLength(1);
 		after.shutdown("quit");
 
 		const gone = restartAfter(before.key, 130_000);
-		vi.advanceTimersByTime(120_000);
-		expect(sentContents(gone)).toEqual([]);
+		expect(sentContents(gone)).toEqual([expect.stringContaining("💓 Heartbeat #1 resumed after pi was not running (every 60s): hb")]);
+		vi.advanceTimersByTime(60_000);
+		expect(sentContents(gone).at(-1)).toContain("Heartbeat #1 tick");
 	});
 
-	it("(27) a heartbeat resumed with its boundary ahead ends when that process quits at once", async () => {
+	it("(27) a heartbeat resumed with its boundary ahead resumes again when that process quits at once", async () => {
 		const before = activation();
 		before.start("startup");
 		await before.startHeartbeat(60, "hb");
@@ -589,11 +601,12 @@ describe("restart survival: replay and recovery", () => {
 		after.shutdown("quit");
 
 		const gone = restartAfter(before.key, 130_000);
-		vi.advanceTimersByTime(120_000);
-		expect(sentContents(gone)).toEqual([]);
+		expect(sentContents(gone)).toEqual([expect.stringContaining("💓 Heartbeat #1 resumed after pi was not running (every 60s): hb")]);
+		vi.advanceTimersByTime(60_000);
+		expect(sentContents(gone).at(-1)).toContain("Heartbeat #1 tick");
 	});
 
-	it("(28) a heartbeat carried across two restarts ends when the third process quits", async () => {
+	it("(28) a heartbeat carried across two restarts resumes after the third process quits", async () => {
 		const before = activation();
 		before.start("startup");
 		await before.startHeartbeat(60, "hb");
@@ -601,11 +614,58 @@ describe("restart survival: replay and recovery", () => {
 
 		const third = restartAfter(before.key, 130_000);
 		third.shutdown("quit");
-		expect(stateOps(before.key).at(-1)).toBe("clear");
+		expect(stateOps(before.key).at(-1)).toBe("heartbeat:start");
 
 		const gone = restartAfter(before.key, 130_000);
-		vi.advanceTimersByTime(120_000);
-		expect(sentContents(gone)).toEqual([]);
+		expect(sentContents(gone)).toEqual([expect.stringContaining("💓 Heartbeat #1 resumed after pi was not running (every 60s): hb")]);
+		vi.advanceTimersByTime(60_000);
+		expect(sentContents(gone).at(-1)).toContain("Heartbeat #1 tick");
+	});
+
+	it("(29) a quit is not a cancel: a pending timer re-arms after the next process opens the session", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.setTimer(600, "still pending");
+		before.shutdown("quit");
+		// No clear: the arm is the last word, and its owner died with the process.
+		expect(stateOps(before.key)).toEqual(["arm"]);
+
+		const after = restartAfter(before.key, 60_000);
+		expect(sentContents(after)).toEqual([]);
+		vi.advanceTimersByTime(539_000);
+		expect(sentContents(after)).toEqual([]);
+		// The deadline is the original one, not 600 s from the restart.
+		vi.advanceTimersByTime(1_000);
+		expect(sentContents(after)).toEqual([expect.stringContaining("Timer [timer-1] fired (after 600s): still pending")]);
+	});
+
+	it("(30) a quit is not a cancel: the heartbeat resumes after the next process opens the session", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.startHeartbeat(60, "hb");
+		before.shutdown("quit");
+		expect(stateOps(before.key)).toEqual(["heartbeat:start"]);
+
+		const after = restartAfter(before.key, 130_000);
+		expect(sentContents(after)).toEqual(["💓 Heartbeat #1 resumed after pi was not running (every 60s): hb"]);
+		vi.advanceTimersByTime(60_000);
+		expect(sentContents(after).at(-1)).toContain("Heartbeat #1 tick");
+	});
+
+	it("(31) an explicit stop or cancel still outlives the quit and the reopen", async () => {
+		const before = activation();
+		before.start("startup");
+		await before.setTimer(600, "cancelled", "t");
+		await before.startHeartbeat(60, "hb");
+		await before.stopHeartbeat();
+		await before.cancel("t");
+		before.shutdown("quit");
+		// The user said stop, twice: the quit writes no clear, and the reopen has nothing to replay.
+		expect(stateOps(before.key)).toEqual(["arm", "heartbeat:start", "heartbeat:stop", "cancel"]);
+
+		const after = restartAfter(before.key, 130_000);
+		vi.advanceTimersByTime(600_000);
+		expect(sentContents(after)).toEqual([]);
 	});
 });
 
@@ -665,9 +725,9 @@ describe("restart survival: tree navigation (#25)", () => {
 	it("(3) a shutdown clear a rewind abandoned still cancels what it names", async () => {
 		const before = activation();
 		before.start("startup");
-		await before.setTimer(600, "quit");
+		await before.setTimer(600, "armed");
 		const anchor = leaf(before.key);
-		before.shutdown("quit");
+		before.shutdown("new");
 
 		rewind(before.key, anchor);
 		const after = restart(before.key);

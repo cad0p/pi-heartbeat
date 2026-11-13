@@ -8,12 +8,12 @@
  *
  * Every action is also appended to the session as a custom entry (see session-state.ts), so a new
  * process replays it: what is still due re-arms, what came due while pi was not running wakes once.
- * A deliberate shutdown writes a `clear`, so only a crash leaves work to recover. Every write goes
- * through `entry.persist`, never a sink held at call time: a second copy's quit must not wipe the
- * log of the activation that owns the session.
+ * `new`, `resume` and `fork` write a `clear`; a quit does not, so it leaves work to recover exactly
+ * like a crash. Every write goes through `entry.persist`, never a sink held at call time: a second
+ * copy's shutdown must not wipe the log of the activation that owns the session.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, SessionShutdownEvent } from "@earendil-works/pi-coding-agent";
 import { currentOwner } from "./process-identity.js";
 import {
 	type ClearReason,
@@ -388,12 +388,17 @@ export class TimerManager {
 	}
 
 	/**
-	 * session_shutdown (any other reason): one `clear` for the whole session, then tear the armed state
-	 * down. Writing before retiring is deliberate — a stale pi makes the sink throw, and that throw must
-	 * not keep the in-memory timers alive.
+	 * session_shutdown (any other reason): tear the armed state down, writing one `clear` for the whole
+	 * session unless this is a quit. A quit is not a cancel: pi reports Ctrl+C, Ctrl+D, SIGHUP and SIGTERM
+	 * as `quit`, so the armed work must survive it the way it survives a crash, and only an explicit
+	 * `heartbeat stop`, `timer cancel` or `/cancel-timer all` says the work is not wanted. Writing before
+	 * retiring is deliberate — a stale pi makes the sink throw, and that throw must not keep the in-memory
+	 * timers alive.
 	 */
-	end(): void {
-		writeRecord(this.session, clearRecord(this.session, "shutdown"));
+	end(reason: Exclude<SessionShutdownEvent["reason"], "reload">): void {
+		if (reason !== "quit") {
+			writeRecord(this.session, clearRecord(this.session, "shutdown"));
+		}
 		retire(this.sessionKey, this.session);
 	}
 
