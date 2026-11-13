@@ -391,9 +391,11 @@ export class TimerManager {
 	 * session_shutdown (any other reason): tear the armed state down, writing one `clear` for the whole
 	 * session unless this is a quit. A quit is not a cancel: pi reports Ctrl+C, Ctrl+D, SIGHUP and SIGTERM
 	 * as `quit`, so the armed work must survive it the way it survives a crash, and only an explicit
-	 * `heartbeat stop`, `timer cancel` or `/cancel-timer all` says the work is not wanted. Writing before
-	 * retiring is deliberate — a stale pi makes the sink throw, and that throw must not keep the in-memory
-	 * timers alive.
+	 * `heartbeat stop`, `timer cancel` or `/cancel-timer all` says the work is not wanted. A subagent child
+	 * session ends the same way, inside this process: its records stay in its transcript, a resume here
+	 * restores nothing because its owner still reads alive, and only a later process that opens the file
+	 * after this one dies re-arms them. Writing before retiring is deliberate — a stale pi makes the sink
+	 * throw, and that throw must not keep the in-memory timers alive.
 	 */
 	end(reason: Exclude<SessionShutdownEvent["reason"], "reload">): void {
 		if (reason !== "quit") {
