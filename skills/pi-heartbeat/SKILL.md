@@ -44,7 +44,7 @@ timer(seconds: 60, message: "Check if build #42 finished — run gh run view 42"
 - Returns immediately with timer ID
 - Multiple timers can be active simultaneously
 - Optional `id` parameter for named timers (enables cancellation)
-- Max 3600 seconds (1 hour)
+- Max `maxBackgroundWait` (30 minutes by default, set in `background-work.json`)
 
 ## Heartbeat
 
@@ -55,7 +55,7 @@ heartbeat(action: "stop")
 ```
 
 - Only one heartbeat active at a time (starting a new one stops the previous)
-- Min interval: 10 seconds
+- Min interval: 10 seconds; max `maxBackgroundWait` (30 minutes by default)
 - Tracks tick count for monitoring duration
 
 ## Surviving a restart

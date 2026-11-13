@@ -10,7 +10,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolCallEventResult } from "@earendil-works/pi-coding-agent";
 import { BACKGROUND_WORK_REGISTRY_KEY, snapshotBackgroundWork } from "@cad0p/pi-background-work";
 import type { TSchema } from "@sinclair/typebox";
 import { vi } from "vitest";
@@ -34,11 +34,17 @@ interface SessionTree {
 	leaf: string | null;
 }
 
-type Handler = (event: { reason: string }, ctx: unknown) => unknown;
+type Handler = (event: unknown, ctx: unknown) => unknown;
 type ToolDef = {
 	name: string;
 	parameters: TSchema;
-	execute: (id: string, params: Record<string, unknown>) => Promise<unknown>;
+	execute: (
+		id: string,
+		params: Record<string, unknown>,
+		signal?: AbortSignal,
+		onUpdate?: unknown,
+		ctx?: unknown,
+	) => Promise<unknown>;
 };
 type CommandDef = { handler: (args: string, ctx: unknown) => Promise<void> };
 type RegistryEntry = { version: number; dispose(): void };
@@ -54,6 +60,8 @@ export interface Activation {
 	stopHeartbeat(): Promise<unknown>;
 	cancel(args: string): Promise<void>;
 	toolSchema(name: string): TSchema;
+	/** Fire the `tool_call` guards as the runtime does; the last answer wins, as a block would. */
+	toolCall(toolName: string, input: Record<string, unknown>): Promise<ToolCallEventResult | undefined>;
 }
 
 const SESSIONS = Symbol.for("pi-heartbeat.sessions");
@@ -224,7 +232,7 @@ export function liveOwner(): PersistOwner {
 	return currentOwner();
 }
 
-export function activation(key: string = randomUUID()): Activation {
+export function activation(key: string = randomUUID(), options: { cwd?: string } = {}): Activation {
 	const handlers = new Map<string, Handler[]>();
 	const tools = new Map<string, ToolDef>();
 	const commands = new Map<string, CommandDef>();
@@ -249,6 +257,8 @@ export function activation(key: string = randomUUID()): Activation {
 	activate(pi as unknown as ExtensionAPI);
 
 	const ctx = {
+		// The tools read `maxBackgroundWait` from background-work.json under this directory.
+		cwd: options.cwd ?? process.cwd(),
 		sessionManager: {
 			getSessionId: () => key,
 			getSessionFile: () => SESSION_FILES.get(key),
@@ -268,7 +278,7 @@ export function activation(key: string = randomUUID()): Activation {
 		if (!tool) {
 			throw new Error(`tool ${name} not registered`);
 		}
-		return tool.execute(name, params);
+		return tool.execute(name, params, undefined, undefined, ctx);
 	};
 
 	const act: Activation = {
@@ -290,6 +300,16 @@ export function activation(key: string = randomUUID()): Activation {
 				throw new Error(`tool ${name} not registered`);
 			}
 			return tool.parameters;
+		},
+		toolCall: async (toolName, input) => {
+			let result: ToolCallEventResult | undefined;
+			for (const handler of handlers.get("tool_call") ?? []) {
+				const answer = (await handler({ type: "tool_call", toolCallId: toolName, toolName, input }, ctx)) as
+					| ToolCallEventResult
+					| undefined;
+				result = answer ?? result;
+			}
+			return result;
 		},
 	};
 	ACTIVATIONS.push(act);
