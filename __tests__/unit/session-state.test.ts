@@ -240,12 +240,12 @@ describe("session state: replay", () => {
 		expect(result.heartbeat).toMatchObject({ id: 2, owner: OWNER });
 	});
 
-	it("(16) a quit only clears the heartbeat its owner started, not the one a second process replaced it with", () => {
-		// P2 starts #1, P1 (same counter) starts #1 after it and crashes, P2 quits holding its #1.
+	it("(16) a replacement clear only clears the heartbeat its owner started, not the one a second process replaced it with", () => {
+		// P2 starts #1, P1 (same counter) starts #1 after it and crashes, P2 is replaced holding its #1.
 		const p1: PersistOwner = { pid: 101, boot: "boot-a", start: "100", uptime: 5 };
 		const p2: PersistOwner = { pid: 202, boot: "boot-a", start: "200", uptime: 5 };
-		const quit = entry({ v: 1, op: "clear", at: AT, owner: p2, reason: "shutdown", timers: [], heartbeat: true });
-		const result = replaySessionState([heartbeatStart(1, 0, p2), heartbeatStart(1, 0, p1), quit], DEAD);
+		const replacement = entry({ v: 1, op: "clear", at: AT, owner: p2, reason: "shutdown", timers: [], heartbeat: true });
+		const result = replaySessionState([heartbeatStart(1, 0, p2), heartbeatStart(1, 0, p1), replacement], DEAD);
 
 		expect(result.heartbeat).toMatchObject({ id: 1, owner: p1 });
 		expect(result.deferred).toBe(0);

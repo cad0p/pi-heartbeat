@@ -34,10 +34,11 @@ export default function activate(pi: ExtensionAPI): void {
 	// Commands
 	registerCancelCommand(pi, manager);
 
-	// Session binding: a reload keeps armed timers and the heartbeat, every other shutdown clears them.
-	// A new process replays the session's log: what is still due re-arms, what came due in the meantime
-	// wakes once. Both writes below go through the entry, which is empty-handed when this activation does
-	// not own the session key.
+	// Session binding: a reload keeps armed timers and the heartbeat; `new`, `resume` and `fork` clear
+	// them; a quit clears nothing, so an interrupted process (Ctrl+C, SIGHUP, SIGTERM all report `quit`)
+	// leaves its work to the next process exactly like a crash. A new process replays the session's log:
+	// what is still due re-arms, what came due in the meantime wakes once. Both writes below go through
+	// the entry, which is empty-handed when this activation does not own the session key.
 	pi.on("session_start", (event, ctx) => {
 		// Before the first write of this activation: a torn last line would swallow it.
 		repairTornTail(ctx.sessionManager.getSessionFile());
@@ -68,7 +69,7 @@ export default function activate(pi: ExtensionAPI): void {
 		if (event.reason === "reload") {
 			manager.detach();
 		} else {
-			manager.end();
+			manager.end(event.reason);
 		}
 	});
 }

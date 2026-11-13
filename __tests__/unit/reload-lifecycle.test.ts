@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { activation, resetSessions, sentContents, sessionRegistry } from "./reload-harness.js";
+import { activation, resetSessions, sentContents, sessionRegistry, stateOps } from "./reload-harness.js";
 
 describe("reload survival: lifecycle", () => {
 	beforeEach(() => {
@@ -12,13 +12,14 @@ describe("reload survival: lifecycle", () => {
 		vi.useRealTimers();
 	});
 
-	it("(5) a non-reload shutdown clears timers and heartbeat and deletes the entry", async () => {
+	it("(5) a replacement shutdown writes the clear and retires the entry", async () => {
 		const before = activation();
 		before.start("startup");
 		await before.setTimer(10, "t");
 		await before.startHeartbeat(10, "hb");
-		before.shutdown("quit");
+		before.shutdown("new");
 
+		expect(stateOps(before.key).at(-1)).toBe("clear");
 		expect(sessionRegistry().has(before.key)).toBe(false);
 		vi.advanceTimersByTime(60_000);
 		expect(before.sendMessage).not.toHaveBeenCalled();

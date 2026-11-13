@@ -186,7 +186,7 @@ function holdsOwner(value: unknown): value is { owner: PersistOwner } {
 }
 
 /**
- * A process death: no `session_shutdown`, so the `clear` a quit would write is not in the log.
+ * A process death: no `session_shutdown`, so the `clear` a replacement would write is not in the log.
  *
  * Teardown still has to release the in-memory timers, so it runs `resetSessions()` and then drops the
  * records those shutdowns appended, leaving the log exactly as the killed process left it. The leaf is the

@@ -320,8 +320,8 @@ export function replaySessionState(entries: readonly ReplayableEntry[], options:
 				for (const id of record.timers) {
 					armed.delete(id);
 				}
-				// Owner-scoped like a stop: a quit by the process whose heartbeat a second one replaced must not
-				// erase the second one's.
+				// Owner-scoped like a stop: a `new`/`resume`/`fork` clear by the process whose heartbeat a second one
+				// replaced must not erase the second one's.
 				if (record.heartbeat === true && heartbeat !== undefined && sameOwner(heartbeat.owner, record.owner)) {
 					heartbeat = undefined;
 				}
