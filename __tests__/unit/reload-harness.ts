@@ -10,10 +10,13 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI, ToolCallEventResult } from "@earendil-works/pi-coding-agent";
 import { BACKGROUND_WORK_REGISTRY_KEY, snapshotBackgroundWork } from "@cad0p/pi-background-work";
 import type { TSchema } from "@sinclair/typebox";
-import { vi } from "vitest";
+import { afterAll, vi } from "vitest";
 import activate from "../../src/index.js";
 import { type PersistOwner, currentOwner, sameOwner } from "../../src/process-identity.js";
 import { HEARTBEAT_STATE_ENTRY, type TimerStateRecord } from "../../src/session-state.js";
@@ -65,6 +68,16 @@ export interface Activation {
 }
 
 const SESSIONS = Symbol.for("pi-heartbeat.sessions");
+
+/**
+ * Where an activation without an explicit cwd runs: an empty temp directory, never the checkout. The
+ * tools read `maxBackgroundWait` from the project's `.pi/` under the cwd, so the repository's own
+ * policy would otherwise decide what the suite sees.
+ */
+const DEFAULT_CWD = mkdtempSync(join(tmpdir(), "pi-heartbeat-cwd-"));
+afterAll(() => {
+	rmSync(DEFAULT_CWD, { recursive: true, force: true });
+});
 
 /** Every activation this harness created, so resetSessions() can shut them all down. */
 const ACTIVATIONS: Activation[] = [];
@@ -258,7 +271,7 @@ export function activation(key: string = randomUUID(), options: { cwd?: string }
 
 	const ctx = {
 		// The tools read `maxBackgroundWait` from background-work.json under this directory.
-		cwd: options.cwd ?? process.cwd(),
+		cwd: options.cwd ?? DEFAULT_CWD,
 		sessionManager: {
 			getSessionId: () => key,
 			getSessionFile: () => SESSION_FILES.get(key),

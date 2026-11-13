@@ -13,7 +13,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
-import { describeWait, maxWaitSeconds } from "../wait-limit.js";
+import { describeCap, describeWait, waitCap } from "../wait-limit.js";
 
 /** Threshold in seconds — sleeps above this get blocked */
 const SLEEP_THRESHOLD = 5;
@@ -70,22 +70,23 @@ export function registerSleepInterceptor(pi: ExtensionAPI): void {
 
 		const header = `Blocked: \`sleep ${sleepSeconds}s\` blocks the chat — the user can't interact while waiting.`;
 		const footer = `Short sleeps (≤${SLEEP_THRESHOLD}s) are still allowed for things like waiting for a server to boot.`;
-		const limit = maxWaitSeconds(ctx.cwd);
-		const cap = describeWait(limit);
+		const cap = waitCap(ctx.cwd);
 
-		if (sleepSeconds > limit) {
+		if (sleepSeconds > cap.limit) {
+			// Name the bound that actually caps the wait: Node's limit makes raising the setting useless.
+			const raise = cap.nodeBound ? "" : ", or raise the setting if the long wait is intended";
 			return {
 				block: true,
 				reason:
 					`${header}\n\n` +
-					`That wait is longer than ${cap}, the cap on background waits (\`maxBackgroundWait\` in \`background-work.json\`, the project's \`.pi/\` or the agent directory), so the \`timer\` and \`heartbeat\` tools would refuse it too. ` +
-					`Split it into waits of ${cap} or less, or raise the setting if the long wait is intended.\n\n` +
+					`That wait is longer than ${describeCap(cap)}. The \`timer\` and \`heartbeat\` tools would refuse it too, ` +
+					`so split it into waits of ${describeWait(cap.limit)} or less${raise}.\n\n` +
 					footer,
 			};
 		}
 
 		// A timer at the sleep's length, never longer than the cap, so the suggestion is one the tool accepts.
-		const suggestion = Math.min(Math.ceil(sleepSeconds), limit);
+		const suggestion = Math.min(Math.ceil(sleepSeconds), cap.limit);
 		return {
 			block: true,
 			reason:

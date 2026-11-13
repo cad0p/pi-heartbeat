@@ -99,7 +99,7 @@ describe("wait limit: maxBackgroundWait", () => {
 		expect(Compile(act.toolSchema("heartbeat")).Check({ action: "start", interval_seconds: 7200 })).toBe(true);
 	});
 
-	it("(6) the sleep interceptor refuses to suggest a timer over the cap, and still suggests one under it", async () => {
+	it("(6) the sleep interceptor refuses to suggest a timer over the cap, and every suggestion is one the tool accepts", async () => {
 		const act = activation(undefined, { cwd });
 
 		const over = await act.toolCall("bash", { command: "npm run build && sleep 3600" });
@@ -111,6 +111,14 @@ describe("wait limit: maxBackgroundWait", () => {
 		const under = await act.toolCall("bash", { command: "sleep 60" });
 		expect(under?.block).toBe(true);
 		expect(under?.reason).toContain("timer(seconds: 60");
+
+		// A fractional cap: rounding the sleep up must not print a timer the tool would refuse.
+		mkdirSync(join(cwd, ".pi"));
+		writeFileSync(join(cwd, ".pi", "background-work.json"), JSON.stringify({ maxBackgroundWait: 120.5 / 60 }));
+		const fractional = await act.toolCall("bash", { command: "sleep 120.4" });
+		const suggested = /timer\(seconds: ([\d.]+)/.exec(fractional?.reason ?? "")?.[1];
+		expect(suggested).toBeDefined();
+		expect(await refusal(act.setTimer(Number(suggested), "suggested"))).toBeNull();
 	});
 
 	it("(7) restored work longer than the cap still re-arms; new requests stay capped", async () => {
@@ -176,6 +184,14 @@ describe("wait limit: maxBackgroundWait", () => {
 			expect(message).not.toContain("raise the setting to wait longer");
 		}
 		expect(listedWork(act.key)).toEqual([]);
+
+		// The guard reads the same cap, so Node's limit binds there too and it cannot advise raising the setting.
+		const blocked = await act.toolCall("bash", { command: "sleep 2147484" });
+		expect(blocked?.block).toBe(true);
+		expect(blocked?.reason).toMatch(/2147483s/);
+		expect(blocked?.reason).toMatch(/Node's timer limit is what binds/);
+		expect(blocked?.reason).not.toContain("raise the setting");
+		expect(blocked?.reason).not.toContain("timer(seconds:");
 
 		expect(await refusal(act.setTimer(2_147_483, "at Node's limit"))).toBeNull();
 		expect(await refusal(act.startHeartbeat(2_147_483, "at Node's limit"))).toBeNull();

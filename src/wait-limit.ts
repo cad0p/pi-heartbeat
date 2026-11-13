@@ -30,9 +30,20 @@ function withinNodeTimerLimit(seconds: number): number {
 	return Math.min(seconds, NODE_TIMER_MAX_SECONDS);
 }
 
-/** The cap in seconds: the setting, or Node's timer limit when the setting asks for more. */
-export function maxWaitSeconds(cwd: string): number {
-	return withinNodeTimerLimit(requestedWaitSeconds(cwd));
+/** The cap here: what the setting asks for, the limit a wait is held to, and which bound sets it. */
+export interface WaitCap {
+	/** The setting, in seconds; above Node's limit when the setting asks for more. */
+	requested: number;
+	/** The cap in seconds: the setting, or Node's timer limit when that is lower. */
+	limit: number;
+	/** Whether Node's timer limit, not the setting, is what caps a wait here. */
+	nodeBound: boolean;
+}
+
+/** The cap here, from one read of the policy. */
+export function waitCap(cwd: string): WaitCap {
+	const requested = requestedWaitSeconds(cwd);
+	return { requested, limit: withinNodeTimerLimit(requested), nodeBound: requested > NODE_TIMER_MAX_SECONDS };
 }
 
 /**
@@ -45,24 +56,31 @@ export function describeWait(limitSeconds: number): string {
 	return minutes === 1 ? "1 minute" : `${minutes} minutes`;
 }
 
-/** Why a wait is refused, or undefined when it is accepted. A wait equal to the cap is accepted. */
-export function waitRefusal(kind: "timer" | "heartbeat", seconds: number, cwd: string): string | undefined {
-	const requested = requestedWaitSeconds(cwd);
-	const limit = withinNodeTimerLimit(requested);
-	if (seconds <= limit) return undefined;
-	const subject = kind === "timer" ? "A timer" : "A heartbeat interval";
-	if (requested > NODE_TIMER_MAX_SECONDS) {
+/**
+ * The cap, named with the bound that sets it. The Node branch never blames the setting: raising it
+ * above the runtime limit changes nothing, so the message has to say that.
+ */
+export function describeCap({ requested, limit, nodeBound }: WaitCap): string {
+	if (nodeBound) {
 		return (
-			`Refused: ${seconds}s is longer than ${NODE_TIMER_MAX_SECONDS}s, the longest delay Node's timers accept — ` +
-			`a longer one fires after 1 ms instead. ${SETTING} is ${describeWait(requested)} here, above that runtime ` +
-			`limit, so Node's timer limit is what binds, not the setting, and raising it will not help. ${subject} is ` +
-			`background work, so it may not outlast that limit.`
+			`${NODE_TIMER_MAX_SECONDS}s, the longest delay Node's timers accept — a longer one fires after 1 ms instead. ` +
+			`${SETTING} is ${describeWait(requested)} here, above that runtime limit, so Node's timer limit is what ` +
+			`binds, not the setting, and raising it will not help`
 		);
 	}
-	const cap = describeWait(limit);
+	return `${SETTING}, which is ${describeWait(limit)} here`;
+}
+
+/** Why a wait is refused, or undefined when it is accepted. A wait equal to the cap is accepted. */
+export function waitRefusal(kind: "timer" | "heartbeat", seconds: number, cwd: string): string | undefined {
+	const cap = waitCap(cwd);
+	if (seconds <= cap.limit) return undefined;
+	const subject = kind === "timer" ? "A timer" : "A heartbeat interval";
+	const advice = cap.nodeBound
+		? ""
+		: ` Waits of ${describeWait(cap.limit)} or less are accepted; raise the setting to wait longer.`;
 	return (
-		`Refused: ${seconds}s is longer than ${SETTING}, which is ${cap} here. ` +
-		`${subject} is background work, so it may not outlast that limit. ` +
-		`Waits of ${cap} or less are accepted; raise the setting to wait longer.`
+		`Refused: ${seconds}s is longer than ${describeCap(cap)}. ` +
+		`${subject} is background work, so it may not outlast that limit.${advice}`
 	);
 }
